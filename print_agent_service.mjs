@@ -304,6 +304,8 @@ async function pollAndProcessPrintJobs() {
   }
 }
 
+const duplexSide1Completed = new Set();
+
 async function executePrintJob(job) {
   const jobId = job.id;
   const tempFilePath = path.join(SPOOL_DIR, `spool_${jobId}.tmp`);
@@ -339,8 +341,29 @@ async function executePrintJob(job) {
       p_status: 'printing'
     });
 
-    // Invoke Windows printing subsystem
-    await printDocumentToWindows(tempFilePath, agentState.selectedPrinter);
+    // Check for double-sided manual duplex workflow
+    if (job.duplex === 'double' && !duplexSide1Completed.has(jobId)) {
+      console.log(`[*] [Job ${job.job_number}] Duplex order: Printing Side 1...`);
+      await printDocumentToWindows(tempFilePath, agentState.selectedPrinter);
+      duplexSide1Completed.add(jobId);
+
+      console.log(`[*] [Job ${job.job_number}] Side 1 printed. Waiting for operator paper flip...`);
+      await callSupabaseRpc('agent_update_job_status', {
+        p_device_id: agentState.deviceId,
+        p_session_token: agentState.sessionToken,
+        p_job_id: jobId,
+        p_status: 'duplex_flip'
+      });
+      return;
+    }
+
+    if (job.duplex === 'double' && duplexSide1Completed.has(jobId)) {
+      console.log(`[*] [Job ${job.job_number}] Duplex order: Printing Side 2 after operator confirmation...`);
+      await printDocumentToWindows(tempFilePath, agentState.selectedPrinter);
+      duplexSide1Completed.delete(jobId);
+    } else {
+      await printDocumentToWindows(tempFilePath, agentState.selectedPrinter);
+    }
 
     // Mark completed
     console.log(`[OK] [Job ${job.job_number}] Successfully printed! Status -> completed.`);
@@ -352,6 +375,7 @@ async function executePrintJob(job) {
     });
   } catch (err) {
     console.error(`[FAIL] [Job ${job.job_number}] Print execution failed:`, err.message);
+    duplexSide1Completed.delete(jobId);
     await callSupabaseRpc('agent_update_job_status', {
       p_device_id: agentState.deviceId,
       p_session_token: agentState.sessionToken,
@@ -360,8 +384,8 @@ async function executePrintJob(job) {
       p_error_message: err.message
     });
   } finally {
-    // CRITICAL SECURITY REQUIREMENT: Immediately purge temporary spool file
-    if (fs.existsSync(tempFilePath)) {
+    // CRITICAL SECURITY REQUIREMENT: Immediately purge temporary spool file when not awaiting flip
+    if (!duplexSide1Completed.has(jobId) && fs.existsSync(tempFilePath)) {
       try {
         fs.unlinkSync(tempFilePath);
         console.log(`[PURGE] Temporary spool file removed: ${tempFilePath}`);

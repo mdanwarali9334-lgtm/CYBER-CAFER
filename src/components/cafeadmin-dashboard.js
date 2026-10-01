@@ -686,6 +686,15 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
                     </button>
                   ` : ''}
 
+                  ${j.status === 'duplex_flip' ? `
+                    <button class="btn btn-sm btn-warning confirm-flip-btn" data-job-id="${j.id}" title="Confirm paper flip and resume printing side 2">
+                      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" style="width:13px;height:13px;margin-right:4px;">
+                        <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                      </svg>
+                      Paper Flipped: Print Side 2
+                    </button>
+                  ` : ''}
+
                   ${['pending', 'queued'].includes(j.status) ? `
                     <button class="btn btn-sm btn-primary send-to-print-btn" data-job-id="${j.id}">
                       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" style="width:13px;height:13px;margin-right:4px;">
@@ -813,6 +822,21 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
           btn.disabled = false;
         } else {
           showNotification('Job reset to pending for retry.', 'success');
+          await loadData();
+        }
+      });
+    });
+
+    content.querySelectorAll('.confirm-flip-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const jId = btn.getAttribute('data-job-id');
+        btn.disabled = true;
+        const res = await manageCafeJob(cafeId, jId, 'confirm_duplex_flip');
+        if (!res.success) {
+          showNotification(res.error || 'Failed to confirm paper flip.', 'error');
+          btn.disabled = false;
+        } else {
+          showNotification('Paper flip confirmed! Resuming Side 2 printing...', 'success');
           await loadData();
         }
       });
@@ -1024,6 +1048,14 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
                 ${isCompletedOrPurged ? '🔒 File Purged' : 'Active (Private Storage)'}
               </span>
             </div>
+            ${job.status === 'duplex_flip' ? `
+              <div class="alert-box alert-warning mt-3" style="border: 2px dashed #f59e0b; background: rgba(245, 158, 11, 0.1); padding: 10px 14px;">
+                <strong style="color:#d97706;font-size:0.9rem;">📄 MANUAL DUPLEX: Side 1 is Complete!</strong>
+                <p class="text-xs text-muted mt-1">
+                  Side 1 has finished printing. Please take the paper from the output tray, flip it over, reinsert it into the paper tray, and click "Confirm Paper Flip &amp; Print Side 2" below.
+                </p>
+              </div>
+            ` : ''}
             ${job.error_message ? `
               <div class="alert-box alert-error mt-3" style="padding:8px 12px;font-size:0.8rem;">
                 <strong>Printer Error:</strong> ${escapeHtml(job.error_message)}
@@ -1041,6 +1073,11 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
             ` : ''}
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            ${job.status === 'duplex_flip' ? `
+              <button class="btn btn-warning modal-confirm-flip-btn">
+                📄 Confirm Paper Flip &amp; Print Side 2
+              </button>
+            ` : ''}
             ${job.status === 'failed' ? `
               <button class="btn btn-primary modal-retry-job-btn">
                 Retry Job
@@ -1070,6 +1107,17 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
     const closeModal = () => modal.remove();
     modal.querySelectorAll('.close-order-modal-btn').forEach(b => b.addEventListener('click', closeModal));
     modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+    modal.querySelector('.modal-confirm-flip-btn')?.addEventListener('click', async () => {
+      closeModal();
+      const res = await manageCafeJob(cafeId, job.id, 'confirm_duplex_flip');
+      if (res.success) {
+        showNotification('Paper flip confirmed! Resuming Side 2 printing...', 'success');
+        loadData();
+      } else {
+        showNotification(res.error || 'Failed to confirm paper flip.', 'error');
+      }
+    });
 
     modal.querySelector('.modal-toggle-pay-btn')?.addEventListener('click', async () => {
       const next = job.payment_status === 'paid' ? 'unpaid' : 'paid';

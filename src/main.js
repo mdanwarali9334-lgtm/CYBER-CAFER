@@ -489,15 +489,134 @@ function initModalsAndActions() {
     });
   }
 
-  // Footer links
+  // Footer policy & terms modal links
   const policyLinks = document.querySelectorAll('.open-policy-link');
   policyLinks.forEach(link => {
     link.addEventListener('click', (e) => {
       e.preventDefault();
-      const type = link.getAttribute('data-policy');
-      showToast(`Opened ${type.toUpperCase()} specification: Zero permanent document retention.`);
+      const type = link.getAttribute('data-policy') || 'privacy';
+      openPolicyModal(type);
     });
   });
+
+  function openPolicyModal(activeTab = 'privacy') {
+    const existing = document.getElementById('platformPolicyModal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'platformPolicyModal';
+    modal.className = 'admin-modal-backdrop';
+    modal.style.display = 'flex';
+
+    modal.innerHTML = `
+      <div class="admin-modal-card" style="max-width: 820px; width: 94vw; max-height: 90vh; display: flex; flex-direction: column;">
+        <div class="modal-header">
+          <div>
+            <span class="pill-tag font-mono">LEGAL &amp; COMPLIANCE</span>
+            <h2 class="editorial-h2" style="font-size: 1.35rem; margin-top: 4px;">Platform Policies &amp; Architecture Standards</h2>
+          </div>
+          <button class="btn btn-sm btn-ghost close-policy-modal-btn" aria-label="Close Modal">&times;</button>
+        </div>
+
+        <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--border-subtle); padding: 10px 0; margin-bottom: 16px;">
+          <button type="button" class="btn btn-sm ${activeTab === 'privacy' ? 'btn-primary' : 'btn-secondary'}" id="policyTabPrivacyBtn">
+            Privacy Policy &amp; Auto-Purge
+          </button>
+          <button type="button" class="btn btn-sm ${activeTab === 'terms' ? 'btn-primary' : 'btn-secondary'}" id="policyTabTermsBtn">
+            Terms of Service &amp; Licensing
+          </button>
+        </div>
+
+        <div class="modal-body" id="policyModalBody" style="overflow-y: auto; flex: 1; padding-right: 8px;">
+          ${renderPolicyContent(activeTab)}
+        </div>
+
+        <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 12px;">
+          <span class="text-xs text-muted font-mono">PressPoint v1.0.0 &bull; Privacy-First Print Architecture</span>
+          <button type="button" class="btn btn-secondary close-policy-modal-btn">Close</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const closeModal = () => modal.remove();
+    modal.querySelectorAll('.close-policy-modal-btn').forEach(b => b.addEventListener('click', closeModal));
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+    const privacyBtn = document.getElementById('policyTabPrivacyBtn');
+    const termsBtn = document.getElementById('policyTabTermsBtn');
+    const bodyEl = document.getElementById('policyModalBody');
+
+    privacyBtn?.addEventListener('click', () => {
+      privacyBtn.className = 'btn btn-sm btn-primary';
+      termsBtn.className = 'btn btn-sm btn-secondary';
+      bodyEl.innerHTML = renderPolicyContent('privacy');
+    });
+
+    termsBtn?.addEventListener('click', () => {
+      termsBtn.className = 'btn btn-sm btn-primary';
+      privacyBtn.className = 'btn btn-sm btn-secondary';
+      bodyEl.innerHTML = renderPolicyContent('terms');
+    });
+  }
+
+  function renderPolicyContent(tab) {
+    if (tab === 'privacy') {
+      return `
+        <div class="policy-article font-sans">
+          <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 8px;">1. Privacy-First Philosophy &amp; Zero Document Retention</h3>
+          <p class="text-sm text-muted mb-4" style="line-height: 1.6;">
+            PressPoint operates under an uncompromising ephemeral data architecture. Walk-in cyber cafe customers upload confidential documents including Aadhaar cards, PAN cards, tax certificates, resumes, and personal contracts. These documents are stored temporarily in an isolated, private cloud vault solely for the active duration required to render preview, spool, and physically print.
+          </p>
+
+          <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 8px;">2. Automatic Document Shredding Lifecycle</h3>
+          <p class="text-sm text-muted mb-4" style="line-height: 1.6;">
+            The moment a print job transitions to <strong>Completed</strong> or <strong>Cancelled</strong>, our automated shredder executes:
+            <ul class="text-sm text-muted mt-2 mb-2" style="padding-left: 20px; line-height: 1.6;">
+              <li>The cloud-hosted document object in private storage is permanently unlinked and deleted.</li>
+              <li>The local Windows temporary spool file on the authorized counter PC is immediately wiped from disk (zero lingering cache).</li>
+              <li>Document viewing is permanently disabled. Only non-document business metadata (Order #, customer display name, page count, and timestamp) is retained for cafe financial accounting.</li>
+            </ul>
+          </p>
+
+          <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 8px;">3. Cryptographic Hardware Isolation &amp; Zero Cross-Cafe Access</h3>
+          <p class="text-sm text-muted mb-4" style="line-height: 1.6;">
+            Each authorized counter PC is authenticated using local ECDSA P-256 asymmetric cryptographic keys. Print agents belonging to Cafe A can never query, inspect, or receive jobs belonging to Cafe B. Private keys remain securely in the local Windows credential store and are never uploaded to the cloud.
+          </p>
+
+          <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 8px;">4. Public QR Code Safety</h3>
+          <p class="text-sm text-muted" style="line-height: 1.6;">
+            Our counter QR codes contain only an opaque public slug identifier. They never embed database passwords, API service keys, or sensitive customer details. Mobile scans resolve safely to the dedicated counter portal.
+          </p>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="policy-article font-sans">
+        <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 8px;">1. Cafe Licensing &amp; Multi-PC Workstation Limits</h3>
+        <p class="text-sm text-muted mb-4" style="line-height: 1.6;">
+          Every Cyber Cafe registered on PressPoint is assigned a cryptographically generated License Key with an authorized PC capacity (e.g. 1 to 5 concurrent counter PCs). Attempts to pair additional workstations beyond the licensed maximum are strictly rejected server-side until an existing device is revoked.
+        </p>
+
+        <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 8px;">2. License Expiration &amp; Continuity Policy</h3>
+        <p class="text-sm text-muted mb-4" style="line-height: 1.6;">
+          Upon license expiry, printing operations and new job transmissions are suspended immediately to safeguard system integrity. However, all historical accounting records, transaction totals, and QR configurations remain intact. Renewing a license reactivates the cafe instantly without data loss.
+        </p>
+
+        <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 8px;">3. Authoritative Server-Side Pricing</h3>
+        <p class="text-sm text-muted mb-4" style="line-height: 1.6;">
+          All print job prices are authoritatively computed on the backend using the cafe's registered rates (B/W Single, B/W Duplex, Colour Single, Colour Duplex). Client-side price tampering via DevTools or API alteration is automatically rejected. Payment collection is executed at the physical counter.
+        </p>
+
+        <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 8px;">4. Manual Duplex Printing Workflow</h3>
+        <p class="text-sm text-muted" style="line-height: 1.6;">
+          For desktop printers without automatic duplex units, PressPoint provides a structured manual duplex workflow. The system signals when Side 1 is complete; operators are responsible for physically re-inserting the printed sheets into the feed tray before confirming Side 2 printing.
+        </p>
+      </div>
+    `;
+  }
 
   const footerContact = document.getElementById('footerContactLink');
   if (footerContact) {

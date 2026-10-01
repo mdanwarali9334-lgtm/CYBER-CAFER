@@ -49,6 +49,7 @@ temp_spool/
 spool/
 storage/
 device_identity.json
+print_agent_identity.json
 
 # Local Test Scripts (containing test credentials)
 test_*.mjs
