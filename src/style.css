@@ -5775,6 +5775,184 @@ html[data-theme="dark"] .admin-topbar {
   flex-direction: column;
 }
 
+/* Document Type Selector Grid */
+.doc-type-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 768px) {
+  .doc-type-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.doc-type-card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--bg-canvas);
+  border: 1.5px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.doc-type-card:hover {
+  border-color: var(--text-accent);
+}
+
+.doc-type-card input[type="radio"] {
+  margin-top: 3px;
+  cursor: pointer;
+}
+
+.doc-type-card:has(input[type="radio"]:checked),
+.doc-type-card.selected {
+  border-color: var(--text-accent);
+  background: var(--bg-surface);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+}
+
+.doc-type-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.doc-type-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.doc-type-content strong {
+  font-size: 0.92rem;
+  color: var(--text-primary);
+}
+
+/* ID Card Front + Back Dedicated Upload Slots */
+.id-card-upload-slots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 640px) {
+  .id-card-upload-slots {
+    grid-template-columns: 1fr;
+  }
+}
+
+.id-slot-card {
+  background: var(--bg-canvas);
+  border: 1.5px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: all 0.2s ease;
+}
+
+.id-slot-card.has-file {
+  border-style: solid;
+  border-color: var(--border-subtle);
+  background: var(--bg-surface);
+}
+
+.id-slot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.id-slot-header strong {
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.id-slot-empty-dropzone {
+  border: 2px dashed var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 24px 12px;
+  text-align: center;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-canvas);
+  transition: all 0.2s ease;
+}
+
+.id-slot-empty-dropzone:hover {
+  border-color: var(--text-accent);
+  background: var(--bg-surface-subtle);
+}
+
+.id-slot-icon {
+  font-size: 1.8rem;
+  margin-bottom: 2px;
+}
+
+.id-slot-preview {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.id-slot-img {
+  width: 76px;
+  height: 52px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+}
+
+.id-slot-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.id-slot-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+/* Pricing & Specification Breakdown Card */
+.pricing-breakdown-card {
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 18px 20px;
+}
+
+.breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.88rem;
+  padding: 4px 0;
+}
+
+.breakdown-divider {
+  border-top: 1px dashed var(--border-subtle);
+  margin: 10px 0;
+}
+
 .order-summary-box {
   background: var(--bg-canvas);
   border: 1px solid var(--border-subtle);

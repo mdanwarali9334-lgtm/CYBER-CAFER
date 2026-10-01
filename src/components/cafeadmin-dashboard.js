@@ -603,7 +603,7 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
                     <span class="job-id-sub font-mono text-muted text-xs">Internal ID: ${escapeHtml(j.job_number)}</span>
                   </div>
                   <div class="job-card-badges">
-                    ${isIdEligible ? `<span class="badge font-mono" style="background:rgba(37,99,235,0.12);color:#2563eb;padding:3px 8px;border-radius:12px;font-size:0.7rem;font-weight:700;">🪪 ID CARD</span>` : ''}
+                    ${isIdEligible ? `<span class="badge font-mono" style="background:rgba(37,99,235,0.12);color:#2563eb;padding:3px 8px;border-radius:12px;font-size:0.7rem;font-weight:700;">🪪 ${j.doc_type === 'aadhaar' ? 'AADHAAR / ID' : j.doc_type === 'other_id' ? 'OTHER ID' : 'ID CARD'}</span>` : ''}
                     <button 
                       type="button" 
                       class="badge-toggle-payment payment-badge-${j.payment_status || 'unpaid'} font-mono" 
@@ -912,6 +912,7 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
   // ----------------------------------------------------
   function isIdCardEligibleJob(job) {
     if (!job) return false;
+    if (job.doc_type === 'aadhaar' || job.doc_type === 'other_id') return true;
     const isImageFile = (name) => /\.(jpe?g|png|webp|bmp)$/i.test(name || '');
     const idKeywords = /(aadhaar|aadhar|pan|voter|license|licence|identity|id[_\s-]?card|front|back|govt?|document)/i;
 

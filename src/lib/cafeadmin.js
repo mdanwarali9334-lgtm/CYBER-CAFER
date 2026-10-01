@@ -260,7 +260,8 @@ export async function submitCustomerPrintOrder({
   colorMode = 'bw',
   duplex = 'single',
   orientation = 'portrait',
-  pageRange = 'all'
+  pageRange = 'all',
+  docType = 'normal'
 }) {
   try {
     const { data, error } = await supabase.rpc('submit_customer_print_order', {
@@ -274,7 +275,8 @@ export async function submitCustomerPrintOrder({
       p_customer_phone: customerPhone || null,
       p_files: Array.isArray(files) && files.length > 0 ? files : [],
       p_orientation: orientation,
-      p_page_range: pageRange
+      p_page_range: pageRange,
+      p_doc_type: docType
     });
     if (error) throw error;
     return data;
