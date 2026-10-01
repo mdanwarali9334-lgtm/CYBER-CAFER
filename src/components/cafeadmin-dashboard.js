@@ -991,110 +991,144 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
     let currentOrientation = 'portrait';
     let elements = [];
     let selectedElementId = null;
+    let croppingElementId = null;
+    let currentZoom = 1.0;
+    let isPreviewMode = false;
     let undoStack = [];
     let redoStack = [];
 
     const PAPER_DIMENSIONS = {
       a4: {
-        portrait: { width: 380, height: 537, dpiW: 2480, dpiH: 3508, label: 'A4: 210 × 297 mm' },
-        landscape: { width: 537, height: 380, dpiW: 3508, dpiH: 2480, label: 'A4: 297 × 210 mm' }
+        portrait: { width: 420, height: 594, dpiW: 2480, dpiH: 3508, label: 'A4: 210 × 297 mm' },
+        landscape: { width: 594, height: 420, dpiW: 3508, dpiH: 2480, label: 'A4: 297 × 210 mm' }
       },
       f4: {
-        portrait: { width: 380, height: 583, dpiW: 2540, dpiH: 3898, label: 'F4: 215 × 330 mm (Foolscap / Legal)' },
-        landscape: { width: 583, height: 380, dpiW: 3898, dpiH: 2540, label: 'F4: 330 × 215 mm (Foolscap / Legal)' }
+        portrait: { width: 420, height: 645, dpiW: 2540, dpiH: 3898, label: 'F4: 215 × 330 mm (Legal)' },
+        landscape: { width: 645, height: 420, dpiW: 3898, dpiH: 2540, label: 'F4: 330 × 215 mm (Legal)' }
       }
     };
 
     function saveState() {
       undoStack.push(JSON.stringify(elements));
-      if (undoStack.length > 25) undoStack.shift();
+      if (undoStack.length > 30) undoStack.shift();
       redoStack = [];
     }
 
     modal.innerHTML = `
       <div class="admin-modal-card a4-editor-modal-card">
+        <!-- Editor Header -->
         <div class="a4-editor-header">
-          <div>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <span class="pill-tag font-mono">COUNTER WORKSPACE</span>
-              <span class="badge font-mono text-xs" style="background:#2563eb;color:#fff;padding:2px 8px;border-radius:12px;font-weight:700;">ADMIN F4 EDITOR</span>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div style="width:36px;height:36px;border-radius:8px;background:rgba(37,99,235,0.15);border:1px solid rgba(59,130,246,0.3);display:flex;align-items:center;justify-content:center;font-size:1.2rem;">
+              🖨
             </div>
-            <h2 class="editorial-h2" style="font-size:1.25rem;margin-top:2px;">F4 Document &amp; ID Card Layout Editor</h2>
-            <p class="text-xs text-muted">
-              Order #${escapeHtml(job.order_number || job.job_number)} &bull; ${escapeHtml(job.customer_name || 'Customer')} &bull; Arrange &amp; verify ID card layout before printing.
-            </p>
+            <div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span class="pill-tag font-mono">PRINT WORKSPACE</span>
+                <span class="badge font-mono text-xs" style="background:#2563eb;color:#fff;padding:2px 8px;border-radius:12px;font-weight:700;">A4 / F4 ID CARD EDITOR</span>
+              </div>
+              <h2 class="editorial-h2" style="font-size:1.15rem;margin:2px 0 0 0;">
+                Order #${escapeHtml(job.order_number || job.job_number)} &bull; ${escapeHtml(job.customer_name || 'Customer')}
+              </h2>
+            </div>
           </div>
-          <div style="display:flex;gap:8px;align-items:center;">
-            <button class="btn btn-sm btn-ghost close-f4-editor-btn" aria-label="Close Editor">&times;</button>
+
+          <div style="display:flex;gap:10px;align-items:center;">
+            <button class="btn btn-sm btn-ghost close-f4-editor-btn" aria-label="Close Editor" style="font-size:1.4rem;line-height:1;padding:4px 8px;">&times;</button>
           </div>
         </div>
 
-        <!-- Presets and Controls Bar -->
+        <!-- Top Controls & Tools Bar -->
         <div class="a4-editor-tools-bar">
           <!-- Paper Size Toggle -->
-          <div style="display:flex;gap:6px;align-items:center;">
+          <div style="display:flex;gap:5px;align-items:center;">
             <span class="a4-control-label">Paper:</span>
             <button type="button" class="btn btn-xs ${currentPaper === 'f4' ? 'btn-primary' : 'btn-secondary'}" id="paperF4Btn" title="F4 (Foolscap / Legal 215×330mm)">F4 Legal</button>
-            <button type="button" class="btn btn-xs ${currentPaper === 'a4' ? 'btn-primary' : 'btn-secondary'}" id="paperA4Btn" title="A4 (210×297mm)">A4 Standard</button>
+            <button type="button" class="btn btn-xs ${currentPaper === 'a4' ? 'btn-primary' : 'btn-secondary'}" id="paperA4Btn" title="A4 Standard (210×297mm)">A4 Standard</button>
           </div>
 
-          <div style="height:18px;width:1px;background:var(--border-subtle);margin:0 4px;"></div>
+          <div style="height:18px;width:1px;background:var(--border-subtle);margin:0 2px;"></div>
 
           <!-- Orientation Toggle -->
-          <div style="display:flex;gap:6px;align-items:center;">
+          <div style="display:flex;gap:5px;align-items:center;">
             <span class="a4-control-label">Orientation:</span>
             <button type="button" class="btn btn-xs ${currentOrientation === 'portrait' ? 'btn-primary' : 'btn-secondary'}" id="f4OrientPortraitBtn">Portrait</button>
             <button type="button" class="btn btn-xs ${currentOrientation === 'landscape' ? 'btn-primary' : 'btn-secondary'}" id="f4OrientLandscapeBtn">Landscape</button>
           </div>
 
-          <div style="height:18px;width:1px;background:var(--border-subtle);margin:0 4px;"></div>
+          <div style="height:18px;width:1px;background:var(--border-subtle);margin:0 2px;"></div>
 
           <!-- Quick Presets -->
-          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-            <span class="a4-control-label">Presets:</span>
-            <button type="button" class="btn btn-xs btn-secondary" id="f4PresetSideBySideBtn" title="Arrange front and back side-by-side (Aadhaar / PAN)">
-              🪪 Side-by-Side (Aadhaar/PAN)
+          <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;">
+            <span class="a4-control-label">Layout:</span>
+            <button type="button" class="btn btn-xs btn-secondary" id="f4PresetSideBySideBtn" title="Arrange front & back side-by-side (Standard Indian Aadhaar/PAN layout)">
+              🪪 Side-by-Side (Aadhaar)
             </button>
-            <button type="button" class="btn btn-xs btn-secondary" id="f4PresetStackedBtn" title="Arrange front and back vertically top & bottom">
-              📄 Stacked Top/Bottom
+            <button type="button" class="btn btn-xs btn-secondary" id="f4PresetStackedBtn" title="Arrange front and back vertically centered">
+              📄 Stacked
             </button>
-            <button type="button" class="btn btn-xs btn-secondary" id="f4PresetFitBtn" title="Fit selected element to sheet">
-              🔲 Fit to Page
+            <button type="button" class="btn btn-xs btn-secondary" id="f4PresetFitBtn" title="Fit selected element to printable area">
+              🔲 Fit to Sheet
             </button>
-            <button type="button" class="btn btn-xs btn-ghost text-muted" id="f4PresetResetBtn" title="Reset layout">
-              ↺ Reset
-            </button>
-            <button type="button" class="btn btn-xs btn-ghost text-muted" id="f4UndoBtn" title="Undo change">
-              ↩ Undo
-            </button>
-            <button type="button" class="btn btn-xs btn-ghost text-muted" id="f4RedoBtn" title="Redo change">
-              ↪ Redo
-            </button>
+          </div>
+
+          <div style="height:18px;width:1px;background:var(--border-subtle);margin:0 2px;"></div>
+
+          <!-- Workspace Zoom Controls -->
+          <div style="display:flex;gap:4px;align-items:center;">
+            <span class="a4-control-label">Zoom:</span>
+            <button type="button" class="btn btn-xs btn-secondary" id="f4ZoomOutBtn" title="Zoom out" style="padding:2px 8px;font-weight:700;">−</button>
+            <span id="f4ZoomLevel" class="font-mono text-xs" style="min-width:38px;text-align:center;font-weight:600;color:var(--text-primary);">100%</span>
+            <button type="button" class="btn btn-xs btn-secondary" id="f4ZoomInBtn" title="Zoom in" style="padding:2px 8px;font-weight:700;">+</button>
+            <button type="button" class="btn btn-xs btn-secondary" id="f4ZoomFitBtn" title="Fit entire page in workspace view">⛶ Fit Page</button>
+          </div>
+
+          <div style="height:18px;width:1px;background:var(--border-subtle);margin:0 2px;"></div>
+
+          <!-- Print Preview Mode Toggle -->
+          <button type="button" class="btn btn-xs btn-secondary" id="f4PrintPreviewBtn" title="Toggle Clean Print Preview Mode without editor guides">
+            👁️ Print Preview
+          </button>
+
+          <!-- History & Reset -->
+          <div style="display:flex;gap:4px;align-items:center;margin-left:auto;">
+            <button type="button" class="btn btn-xs btn-ghost text-muted" id="f4UndoBtn" title="Undo (Ctrl+Z)">↩ Undo</button>
+            <button type="button" class="btn btn-xs btn-ghost text-muted" id="f4RedoBtn" title="Redo (Ctrl+Y)">↪ Redo</button>
+            <button type="button" class="btn btn-xs btn-ghost text-muted" id="f4PresetResetBtn" title="Reset all elements to default">↺ Reset</button>
           </div>
         </div>
 
-        <!-- Canvas Workspace -->
+        <!-- Main Workspace (A4 Dominant Hero + Compact Sidebar) -->
         <div class="a4-editor-workspace">
           <!-- Canvas Viewport -->
           <div class="a4-canvas-viewport" id="f4CanvasViewport">
-            <div class="a4-paper-sheet ${currentPaper}-${currentOrientation}" id="f4PaperSheet">
-              <div class="a4-margin-guide"></div>
-              <!-- Placed Elements -->
+            <!-- Sheet Zoom Wrapper -->
+            <div class="a4-sheet-zoom-wrapper" id="f4SheetZoomWrapper">
+              <div class="a4-paper-sheet ${currentPaper}-${currentOrientation}" id="f4PaperSheet">
+                <div class="a4-margin-guide"></div>
+                <!-- Interactive Placed Elements Rendered Here -->
+              </div>
             </div>
-            <div class="a4-sheet-meta font-mono" style="position:absolute;bottom:10px;left:24px;font-size:0.75rem;color:#a1a1aa;">
-              <span id="f4DimensionsLabel">F4: 215 × 330 mm (Portrait)</span>
-              <span> &bull; Click to select &bull; Drag to move</span>
+
+            <!-- Viewport Bottom Status Bar -->
+            <div class="a4-sheet-meta font-mono">
+              <span id="f4DimensionsLabel" style="font-weight:600;color:#e4e4e7;">F4: 215 × 330 mm (PORTRAIT)</span>
+              <span> &bull; 100% Print-Accurate Ratio</span>
+              <span> &bull; Click card to select &bull; Drag to position &bull; Drag corners to resize</span>
             </div>
           </div>
 
-          <!-- Controls Sidebar -->
+          <!-- Compact Controls Sidebar -->
           <div class="a4-editor-sidebar">
             <div class="a4-sidebar-section">
-              <h4 class="a4-sidebar-title">Documents / ID Photos (${loadedImages.length})</h4>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <h4 class="a4-sidebar-title" style="margin:0;">ID Photos (<span id="f4ImagesCount">${loadedImages.length}</span>)</h4>
+                <span class="text-xs text-muted">A4 Layers</span>
+              </div>
               <div class="a4-elements-list" id="f4ElementsList"></div>
-              <div style="margin-top:10px;">
+              <div style="margin-top:8px;">
                 <label class="btn btn-xs btn-secondary w-full" style="text-align:center;cursor:pointer;display:block;">
-                  + Add Extra Image
+                  + Add Extra Photo / File
                   <input type="file" id="f4AddExtraFileInput" accept="image/jpeg,image/png,image/webp" style="display:none;" />
                 </label>
               </div>
@@ -1102,13 +1136,23 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
 
             <!-- Selected Element Adjustments -->
             <div class="a4-sidebar-section" id="f4SelectedControls" style="display:none;">
-              <h4 class="a4-sidebar-title">Selected ID Adjustments</h4>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <h4 class="a4-sidebar-title" style="margin:0;">Card Adjustments</h4>
+                <span id="f4SelectedCardBadge" class="badge font-mono text-xs" style="background:#2563eb;color:#fff;">#1</span>
+              </div>
+
+              <!-- In-place Crop action from sidebar -->
+              <div class="a4-control-group">
+                <button type="button" class="btn btn-xs btn-secondary w-full" id="f4SidebarCropBtn" style="font-weight:600;background:rgba(37,99,235,0.1);border-color:rgba(37,99,235,0.4);color:#60a5fa;">
+                  ✂️ Crop Selected Card
+                </button>
+              </div>
 
               <div class="a4-control-group">
                 <label class="a4-control-label">Scale: <span id="f4ScaleLabel" class="font-mono text-accent">100%</span></label>
                 <div style="display:flex;align-items:center;gap:6px;">
                   <button type="button" class="btn btn-xs btn-ghost" id="f4ScaleMinus">-</button>
-                  <input type="range" id="f4ScaleSlider" min="20" max="300" value="100" class="a4-slider" />
+                  <input type="range" id="f4ScaleSlider" min="30" max="250" value="100" class="a4-slider" />
                   <button type="button" class="btn btn-xs btn-ghost" id="f4ScalePlus">+</button>
                 </div>
               </div>
@@ -1122,7 +1166,7 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
               </div>
 
               <div class="a4-control-group">
-                <label class="a4-control-label">Position Alignment</label>
+                <label class="a4-control-label">Align on Sheet</label>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
                   <button type="button" class="btn btn-xs btn-secondary" id="f4AlignTop">Align Top</button>
                   <button type="button" class="btn btn-xs btn-secondary" id="f4AlignBottom">Align Bottom</button>
@@ -1131,21 +1175,26 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
                 </div>
               </div>
 
-              <div class="a4-control-group" style="padding-top:8px;border-top:1px dashed var(--border-subtle);">
-                <button type="button" class="btn btn-xs btn-danger w-full" id="f4RemoveElementBtn">🗑 Remove from Canvas</button>
+              <div class="a4-control-group" style="padding-top:6px;border-top:1px dashed var(--border-subtle);margin-top:6px;">
+                <button type="button" class="btn btn-xs btn-danger w-full" id="f4RemoveElementBtn">🗑 Remove from Page</button>
               </div>
             </div>
 
-            <div class="a4-sidebar-section text-xs text-muted" style="margin-top:auto;">
-              <p>🖨 <strong>Counter Print Dispatch:</strong> Layout renders at 300 DPI high-resolution for physical counter printing.</p>
+            <!-- Print Guarantee Note -->
+            <div class="a4-sidebar-section text-xs text-muted" style="margin-top:auto;background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle);border-radius:6px;padding:8px;">
+              <p style="margin:0 0 4px 0;font-weight:600;color:var(--text-primary);">🖨 Print Fidelity Guarantee</p>
+              <p style="margin:0;font-size:0.75rem;">Workspace WYSIWYG renders at <strong>300 DPI high-definition</strong>. Physical print on counter printer matches this exact sheet arrangement.</p>
             </div>
           </div>
         </div>
 
-        <!-- Footer Actions -->
-        <div class="a4-editor-footer" style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;border-top:1px solid var(--border-subtle);margin-top:12px;">
-          <button type="button" class="btn btn-secondary close-f4-editor-btn">Cancel</button>
-          <button type="button" class="btn btn-primary" id="f4SaveAndApplyBtn" style="background:#2563eb;border-color:#2563eb;font-weight:700;">
+        <!-- Editor Footer -->
+        <div class="a4-editor-footer" style="display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid var(--border-subtle);">
+          <div style="display:flex;gap:12px;align-items:center;">
+            <button type="button" class="btn btn-secondary close-f4-editor-btn">Cancel</button>
+            <span class="text-xs text-muted" id="f4FooterInfo">F4 215×330mm &bull; 300 DPI Export (2540×3898 px)</span>
+          </div>
+          <button type="button" class="btn btn-primary" id="f4SaveAndApplyBtn" style="background:#2563eb;border-color:#2563eb;font-weight:700;padding:8px 20px;">
             ✔ Finalize &amp; Save Print Layout
           </button>
         </div>
@@ -1156,17 +1205,19 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
 
     // Initialize elements from loadedImages
     loadedImages.forEach((imgItem, idx) => {
+      // Calculate realistic Aadhaar card default size (approx 170px × 107px on 420px sheet)
       elements.push({
         id: 'elem_' + Math.random().toString(36).substring(2, 9),
-        name: imgItem.name,
+        name: imgItem.name || (idx === 0 ? 'Front ID' : 'Back ID'),
         url: imgItem.url,
-        x: 40,
-        y: 40 + (idx * 160),
-        width: 220,
-        height: 140,
+        originalUrl: imgItem.url,
+        x: 35 + (idx * 190),
+        y: 60,
+        width: 170,
+        height: 108,
         rotation: 0,
         scale: 100,
-        aspectRatio: 1.58
+        aspectRatio: 1.585
       });
     });
 
@@ -1180,7 +1231,6 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
       img.onload = () => {
         if (img.naturalWidth && img.naturalHeight) {
           elem.aspectRatio = img.naturalWidth / img.naturalHeight;
-          elem.width = Math.min(260, Math.round(150 * elem.aspectRatio));
           elem.height = Math.round(elem.width / elem.aspectRatio);
           renderCanvasElements();
         }
@@ -1194,10 +1244,50 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
     }
     modal.querySelectorAll('.close-f4-editor-btn').forEach(btn => btn.addEventListener('click', closeEditor));
 
+    // Workspace Zoom Implementation
+    function applyWorkspaceZoom(zoom) {
+      currentZoom = Math.max(0.35, Math.min(2.5, Math.round(zoom * 100) / 100));
+      const zoomWrapper = document.getElementById('f4SheetZoomWrapper');
+      const zoomLabel = document.getElementById('f4ZoomLevel');
+      if (zoomWrapper) {
+        zoomWrapper.style.transform = `scale(${currentZoom})`;
+      }
+      if (zoomLabel) {
+        zoomLabel.textContent = `${Math.round(currentZoom * 100)}%`;
+      }
+    }
+
+    function fitToPage() {
+      const vp = document.getElementById('f4CanvasViewport');
+      if (!vp) return;
+      const curConfig = PAPER_DIMENSIONS[currentPaper][currentOrientation];
+      const availW = vp.clientWidth - 48;
+      const availH = vp.clientHeight - 48;
+      if (availW <= 0 || availH <= 0) return;
+
+      const scaleX = availW / curConfig.width;
+      const scaleY = availH / curConfig.height;
+      const fitScale = Math.min(scaleX, scaleY);
+      applyWorkspaceZoom(Math.min(1.4, Math.max(0.4, fitScale)));
+    }
+
+    document.getElementById('f4ZoomInBtn')?.addEventListener('click', () => {
+      applyWorkspaceZoom(currentZoom + 0.1);
+    });
+
+    document.getElementById('f4ZoomOutBtn')?.addEventListener('click', () => {
+      applyWorkspaceZoom(currentZoom - 0.1);
+    });
+
+    document.getElementById('f4ZoomFitBtn')?.addEventListener('click', () => {
+      fitToPage();
+    });
+
     // Update dimensions / class
     function updateSheetSize() {
       const sheet = document.getElementById('f4PaperSheet');
       const label = document.getElementById('f4DimensionsLabel');
+      const footerInfo = document.getElementById('f4FooterInfo');
       const curConfig = PAPER_DIMENSIONS[currentPaper][currentOrientation];
 
       if (sheet) {
@@ -1205,6 +1295,9 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
       }
       if (label) {
         label.textContent = `${curConfig.label} (${currentOrientation.toUpperCase()})`;
+      }
+      if (footerInfo) {
+        footerInfo.textContent = `${currentPaper.toUpperCase()} ${currentOrientation} &bull; 300 DPI Export (${curConfig.dpiW}×${curConfig.dpiH} px)`;
       }
 
       // Update toggle buttons
@@ -1223,6 +1316,7 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
       }
 
       renderCanvasElements();
+      setTimeout(fitToPage, 50);
     }
 
     // Paper buttons
@@ -1251,35 +1345,42 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
       updateSheetSize();
     });
 
-    // Presets: Side-by-Side (Aadhaar / PAN)
+    // Presets: Side-by-Side (Aadhaar / PAN - 85.6mm standard card width)
     document.getElementById('f4PresetSideBySideBtn')?.addEventListener('click', () => {
       saveState();
       currentOrientation = 'portrait';
       updateSheetSize();
+
+      // On 420px sheet, Aadhaar cards (approx 170px width each) with 20px gap
+      const cardW = 170;
+      const cardH = Math.round(cardW / 1.585); // 107px
+
       if (elements.length >= 2) {
-        const cardW = 150;
-        const cardH = Math.round(cardW / 1.58);
         elements[0].x = 28;
-        elements[0].y = 80;
+        elements[0].y = 70;
         elements[0].width = cardW;
         elements[0].height = cardH;
         elements[0].rotation = 0;
         elements[0].scale = 100;
 
-        elements[1].x = 196;
-        elements[1].y = 80;
+        elements[1].x = 222;
+        elements[1].y = 70;
         elements[1].width = cardW;
         elements[1].height = cardH;
         elements[1].rotation = 0;
         elements[1].scale = 100;
       } else if (elements.length === 1) {
-        elements[0].x = 110;
-        elements[0].y = 80;
+        elements[0].x = Math.round((420 - cardW) / 2);
+        elements[0].y = 70;
+        elements[0].width = cardW;
+        elements[0].height = cardH;
         elements[0].rotation = 0;
         elements[0].scale = 100;
       }
+
       renderCanvasElements();
       renderSidebarList();
+      updateSelectedUI();
     });
 
     // Presets: Stacked Top/Bottom
@@ -1288,26 +1389,29 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
       currentOrientation = 'portrait';
       updateSheetSize();
       const sheetW = PAPER_DIMENSIONS[currentPaper][currentOrientation].width;
-      const cardW = 240;
+      const cardW = 230;
+
       elements.forEach((elem, idx) => {
         elem.width = cardW;
-        elem.height = Math.round(cardW / (elem.aspectRatio || 1.58));
+        elem.height = Math.round(cardW / (elem.aspectRatio || 1.585));
         elem.x = Math.round((sheetW - cardW) / 2);
-        elem.y = 50 + (idx * (elem.height + 30));
+        elem.y = 50 + (idx * (elem.height + 25));
         elem.rotation = 0;
         elem.scale = 100;
       });
+
       renderCanvasElements();
       renderSidebarList();
+      updateSelectedUI();
     });
 
-    // Presets: Fit to Page
+    // Presets: Fit to Sheet
     document.getElementById('f4PresetFitBtn')?.addEventListener('click', () => {
       const selected = elements.find(e => e.id === selectedElementId) || elements[0];
       if (!selected) return;
       saveState();
       const sheet = PAPER_DIMENSIONS[currentPaper][currentOrientation];
-      const margin = 24;
+      const margin = 20;
       const availW = sheet.width - (margin * 2);
       const availH = sheet.height - (margin * 2);
       const ratio = selected.aspectRatio || 1.414;
@@ -1331,10 +1435,10 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
     document.getElementById('f4PresetResetBtn')?.addEventListener('click', () => {
       saveState();
       elements.forEach((elem, idx) => {
-        elem.x = 40;
-        elem.y = 40 + (idx * 160);
-        elem.width = 220;
-        elem.height = Math.round(220 / (elem.aspectRatio || 1.58));
+        elem.x = 35 + (idx * 190);
+        elem.y = 60;
+        elem.width = 170;
+        elem.height = Math.round(170 / (elem.aspectRatio || 1.585));
         elem.rotation = 0;
         elem.scale = 100;
       });
@@ -1363,6 +1467,30 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
       updateSelectedUI();
     });
 
+    // Print Preview Toggle
+    document.getElementById('f4PrintPreviewBtn')?.addEventListener('click', () => {
+      isPreviewMode = !isPreviewMode;
+      const vp = document.getElementById('f4CanvasViewport');
+      const prevBtn = document.getElementById('f4PrintPreviewBtn');
+      if (vp) {
+        if (isPreviewMode) {
+          vp.classList.add('print-preview-mode');
+          if (prevBtn) {
+            prevBtn.textContent = '✏️ Exit Preview';
+            prevBtn.classList.remove('btn-secondary');
+            prevBtn.classList.add('btn-primary');
+          }
+        } else {
+          vp.classList.remove('print-preview-mode');
+          if (prevBtn) {
+            prevBtn.textContent = '👁️ Print Preview';
+            prevBtn.classList.remove('btn-primary');
+            prevBtn.classList.add('btn-secondary');
+          }
+        }
+      }
+    });
+
     // Render Canvas Elements
     function renderCanvasElements() {
       const sheet = document.getElementById('f4PaperSheet');
@@ -1371,9 +1499,12 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
       // Keep guide
       sheet.innerHTML = '<div class="a4-margin-guide"></div>';
 
-      elements.forEach(elem => {
+      elements.forEach((elem, idx) => {
         const item = document.createElement('div');
-        item.className = `a4-canvas-element ${elem.id === selectedElementId ? 'selected' : ''}`;
+        const isSelected = elem.id === selectedElementId;
+        const isCropping = elem.id === croppingElementId;
+
+        item.className = `a4-canvas-element ${isSelected ? 'selected' : ''} ${isCropping ? 'cropping-active' : ''}`;
         item.setAttribute('data-id', elem.id);
 
         const scaledW = Math.round(elem.width * (elem.scale / 100));
@@ -1385,27 +1516,93 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
         item.style.height = `${scaledH}px`;
         item.style.transform = `rotate(${elem.rotation}deg)`;
 
+        // Label name
+        const sideLabel = idx === 0 ? 'Front' : (idx === 1 ? 'Back' : `Card ${idx + 1}`);
+
         item.innerHTML = `
           <img src="${escapeHtml(elem.url)}" alt="${escapeHtml(elem.name)}" draggable="false" style="width:100%;height:100%;object-fit:fill;" />
           <div class="a4-element-drag-handle" title="Drag to reposition">✥</div>
+          <div class="a4-element-badge">#${idx + 1} ${sideLabel}</div>
           <div class="a4-element-label font-mono">${escapeHtml(elem.name)}</div>
+          
+          <!-- Direct Corner Resize Handles -->
+          <div class="elem-resize-handle top-left" data-corner="tl" title="Resize"></div>
+          <div class="elem-resize-handle top-right" data-corner="tr" title="Resize"></div>
+          <div class="elem-resize-handle bottom-right" data-corner="br" title="Resize"></div>
+          <div class="elem-resize-handle bottom-left" data-corner="bl" title="Resize"></div>
+
+          <!-- Floating Quick-Bar for Selected Card -->
+          <div class="elem-quick-bar">
+            <button type="button" class="elem-quick-btn quick-crop-btn" title="Crop this card">✂️ Crop</button>
+            <button type="button" class="elem-quick-btn quick-rot-ccw" title="Rotate CCW 90°">↺</button>
+            <button type="button" class="elem-quick-btn quick-rot-cw" title="Rotate CW 90°">↻</button>
+            <button type="button" class="elem-quick-btn quick-del-btn" style="color:#ef4444;" title="Remove card">🗑</button>
+          </div>
         `;
 
-        item.addEventListener('mousedown', (e) => {
-          selectedElementId = elem.id;
+        // Direct selection & Drag
+        item.addEventListener('pointerdown', (e) => {
+          if (croppingElementId) return; // Disallow moving while in crop mode
+          if (e.target.classList.contains('elem-resize-handle') || e.target.closest('.elem-quick-bar')) {
+            return; // handled separately
+          }
+
+          if (selectedElementId !== elem.id) {
+            selectedElementId = elem.id;
+            renderCanvasElements();
+            renderSidebarList();
+            updateSelectedUI();
+          }
+
+          initDrag(e, elem, item);
+        });
+
+        // Corner resize handles
+        item.querySelectorAll('.elem-resize-handle').forEach(handle => {
+          handle.addEventListener('pointerdown', (e) => {
+            e.stopPropagation();
+            const corner = handle.getAttribute('data-corner');
+            initCornerResize(e, elem, item, corner);
+          });
+        });
+
+        // Quick-bar actions
+        item.querySelector('.quick-crop-btn')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          startInPlaceCrop(elem);
+        });
+
+        item.querySelector('.quick-rot-ccw')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          saveState();
+          elem.rotation = (elem.rotation - 90) % 360;
+          renderCanvasElements();
+        });
+
+        item.querySelector('.quick-rot-cw')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          saveState();
+          elem.rotation = (elem.rotation + 90) % 360;
+          renderCanvasElements();
+        });
+
+        item.querySelector('.quick-del-btn')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          saveState();
+          elements = elements.filter(el => el.id !== elem.id);
+          selectedElementId = elements.length > 0 ? elements[0].id : null;
           renderCanvasElements();
           renderSidebarList();
           updateSelectedUI();
-          initDrag(e, elem, item);
         });
 
         sheet.appendChild(item);
       });
     }
 
-    // Drag move
+    // Drag move on sheet
     function initDrag(e, elem, domItem) {
-      if (e.button !== 0) return;
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
       e.preventDefault();
 
       const startX = e.clientX;
@@ -1413,49 +1610,368 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
       const origX = elem.x;
       const origY = elem.y;
       const sheet = PAPER_DIMENSIONS[currentPaper][currentOrientation];
-
-      saveState();
+      let hasMoved = false;
 
       function onMove(moveEvt) {
-        const dx = moveEvt.clientX - startX;
-        const dy = moveEvt.clientY - startY;
-        elem.x = Math.max(0, Math.min(origX + dx, sheet.width - 30));
+        hasMoved = true;
+        // Adjust delta for current workspace zoom
+        const dx = (moveEvt.clientX - startX) / currentZoom;
+        const dy = (moveEvt.clientY - startY) / currentZoom;
+        const scaledW = Math.round(elem.width * (elem.scale / 100));
+        const scaledH = Math.round(elem.height * (elem.scale / 100));
+
+        elem.x = Math.max(-scaledW + 30, Math.min(origX + dx, sheet.width - 30));
         elem.y = Math.max(0, Math.min(origY + dy, sheet.height - 30));
         domItem.style.left = `${elem.x}px`;
         domItem.style.top = `${elem.y}px`;
       }
 
       function onUp() {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        if (hasMoved) {
+          saveState();
+        }
       }
 
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
     }
+
+    // Direct Corner Resize on Sheet
+    function initCornerResize(e, elem, domItem, corner) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const origW = elem.width * (elem.scale / 100);
+      const origH = elem.height * (elem.scale / 100);
+      const origX = elem.x;
+      const origY = elem.y;
+      const ratio = elem.aspectRatio || (origW / origH);
+      let hasChanged = false;
+
+      function onMove(moveEvt) {
+        hasChanged = true;
+        const dx = (moveEvt.clientX - startX) / currentZoom;
+        const dy = (moveEvt.clientY - startY) / currentZoom;
+
+        let newW = origW;
+        let newH = origH;
+        let newX = origX;
+        let newY = origY;
+
+        if (corner === 'br') {
+          newW = Math.max(60, origW + dx);
+          newH = Math.round(newW / ratio);
+        } else if (corner === 'bl') {
+          newW = Math.max(60, origW - dx);
+          newH = Math.round(newW / ratio);
+          newX = origX + (origW - newW);
+        } else if (corner === 'tr') {
+          newW = Math.max(60, origW + dx);
+          newH = Math.round(newW / ratio);
+          newY = origY + (origH - newH);
+        } else if (corner === 'tl') {
+          newW = Math.max(60, origW - dx);
+          newH = Math.round(newW / ratio);
+          newX = origX + (origW - newW);
+          newY = origY + (origH - newH);
+        }
+
+        elem.width = Math.round(newW / (elem.scale / 100));
+        elem.height = Math.round(newH / (elem.scale / 100));
+        elem.x = Math.round(newX);
+        elem.y = Math.round(newY);
+
+        domItem.style.width = `${newW}px`;
+        domItem.style.height = `${newH}px`;
+        domItem.style.left = `${elem.x}px`;
+        domItem.style.top = `${elem.y}px`;
+      }
+
+      function onUp() {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        if (hasChanged) {
+          saveState();
+          renderCanvasElements();
+          updateSelectedUI();
+        }
+      }
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    }
+
+    // In-Place Smooth Crop Engine
+    function startInPlaceCrop(elem) {
+      croppingElementId = elem.id;
+      const sheet = document.getElementById('f4PaperSheet');
+      if (!sheet) return;
+
+      // Existing crop overlays cleanup
+      sheet.querySelectorAll('.elem-crop-overlay').forEach(el => el.remove());
+
+      const domItem = sheet.querySelector(`.a4-canvas-element[data-id="${elem.id}"]`);
+      if (!domItem) return;
+
+      const cropOverlay = document.createElement('div');
+      cropOverlay.className = 'elem-crop-overlay';
+
+      const scaledW = Math.round(elem.width * (elem.scale / 100));
+      const scaledH = Math.round(elem.height * (elem.scale / 100));
+
+      cropOverlay.style.left = `${elem.x}px`;
+      cropOverlay.style.top = `${elem.y}px`;
+      cropOverlay.style.width = `${scaledW}px`;
+      cropOverlay.style.height = `${scaledH}px`;
+
+      // Crop box state inside image bounds
+      let cropState = {
+        x: Math.round(scaledW * 0.05),
+        y: Math.round(scaledH * 0.05),
+        w: Math.round(scaledW * 0.9),
+        h: Math.round(scaledH * 0.9)
+      };
+
+      cropOverlay.innerHTML = `
+        <div class="elem-crop-box" id="activeCropBox" style="left:${cropState.x}px;top:${cropState.y}px;width:${cropState.w}px;height:${cropState.h}px;">
+          <div class="crop-grid-line h1"></div>
+          <div class="crop-grid-line h2"></div>
+          <div class="crop-grid-line v1"></div>
+          <div class="crop-grid-line v2"></div>
+          <div class="crop-handle nw" data-h="nw"></div>
+          <div class="crop-handle n" data-h="n"></div>
+          <div class="crop-handle ne" data-h="ne"></div>
+          <div class="crop-handle e" data-h="e"></div>
+          <div class="crop-handle se" data-h="se"></div>
+          <div class="crop-handle s" data-h="s"></div>
+          <div class="crop-handle sw" data-h="sw"></div>
+          <div class="crop-handle w" data-h="w"></div>
+        </div>
+
+        <div class="crop-action-bar" style="top:${scaledH + 12}px;">
+          <button type="button" class="crop-action-btn apply-btn" id="cropApplyBtn">✔ Apply Crop</button>
+          <button type="button" class="crop-action-btn reset-btn" id="cropResetBtn">↺ Full Image</button>
+          <button type="button" class="crop-action-btn cancel-btn" id="cropCancelBtn">✕ Cancel</button>
+        </div>
+      `;
+
+      sheet.appendChild(cropOverlay);
+
+      const cropBox = cropOverlay.querySelector('#activeCropBox');
+
+      function updateCropBoxDOM() {
+        cropBox.style.left = `${cropState.x}px`;
+        cropBox.style.top = `${cropState.y}px`;
+        cropBox.style.width = `${cropState.w}px`;
+        cropBox.style.height = `${cropState.h}px`;
+      }
+
+      // Move crop box inside image
+      cropBox.addEventListener('pointerdown', (e) => {
+        if (e.target.classList.contains('crop-handle')) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const origX = cropState.x;
+        const origY = cropState.y;
+
+        function onMove(mEvt) {
+          const dx = (mEvt.clientX - startX) / currentZoom;
+          const dy = (mEvt.clientY - startY) / currentZoom;
+
+          cropState.x = Math.max(0, Math.min(scaledW - cropState.w, origX + dx));
+          cropState.y = Math.max(0, Math.min(scaledH - cropState.h, origY + dy));
+          updateCropBoxDOM();
+        }
+
+        function onUp() {
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', onUp);
+        }
+
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+      });
+
+      // Handle resize of crop box
+      cropOverlay.querySelectorAll('.crop-handle').forEach(h => {
+        h.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          const dir = h.getAttribute('data-h');
+          const startX = e.clientX;
+          const startY = e.clientY;
+          const orig = { ...cropState };
+
+          function onMove(mEvt) {
+            const dx = (mEvt.clientX - startX) / currentZoom;
+            const dy = (mEvt.clientY - startY) / currentZoom;
+
+            if (dir.includes('e')) {
+              cropState.w = Math.max(30, Math.min(scaledW - orig.x, orig.w + dx));
+            }
+            if (dir.includes('s')) {
+              cropState.h = Math.max(30, Math.min(scaledH - orig.y, orig.h + dy));
+            }
+            if (dir.includes('w')) {
+              const maxLeft = orig.x + orig.w - 30;
+              const newX = Math.max(0, Math.min(maxLeft, orig.x + dx));
+              cropState.w = orig.w + (orig.x - newX);
+              cropState.x = newX;
+            }
+            if (dir.includes('n')) {
+              const maxTop = orig.y + orig.h - 30;
+              const newY = Math.max(0, Math.min(maxTop, orig.y + dy));
+              cropState.h = orig.h + (orig.y - newY);
+              cropState.y = newY;
+            }
+
+            updateCropBoxDOM();
+          }
+
+          function onUp() {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+          }
+
+          window.addEventListener('pointermove', onMove);
+          window.addEventListener('pointerup', onUp);
+        });
+      });
+
+      // Apply Crop
+      cropOverlay.querySelector('#cropApplyBtn')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const applyBtn = cropOverlay.querySelector('#cropApplyBtn');
+        applyBtn.textContent = 'Cropping...';
+        applyBtn.disabled = true;
+
+        try {
+          saveState();
+
+          // Calculate normalized fractions
+          const cropFracX = cropState.x / scaledW;
+          const cropFracY = cropState.y / scaledH;
+          const cropFracW = cropState.w / scaledW;
+          const cropFracH = cropState.h / scaledH;
+
+          // Load original image to preserve full resolution
+          const sourceImg = new Image();
+          sourceImg.crossOrigin = 'anonymous';
+          await new Promise((resolve, reject) => {
+            sourceImg.onload = resolve;
+            sourceImg.onerror = () => reject(new Error('Failed to load image for crop.'));
+            sourceImg.src = elem.originalUrl || elem.url;
+          });
+
+          const natW = sourceImg.naturalWidth;
+          const natH = sourceImg.naturalHeight;
+
+          const sx = Math.round(cropFracX * natW);
+          const sy = Math.round(cropFracY * natH);
+          const sW = Math.max(1, Math.round(cropFracW * natW));
+          const sH = Math.max(1, Math.round(cropFracH * natH));
+
+          const cropCanvas = document.createElement('canvas');
+          cropCanvas.width = sW;
+          cropCanvas.height = sH;
+          const ctx = cropCanvas.getContext('2d');
+          ctx.drawImage(sourceImg, sx, sy, sW, sH, 0, 0, sW, sH);
+
+          const croppedBlob = await new Promise(resolve => cropCanvas.toBlob(resolve, 'image/jpeg', 0.96));
+          const croppedBlobUrl = URL.createObjectURL(croppedBlob);
+
+          // Update element properties smoothly without jumping position
+          elem.url = croppedBlobUrl;
+          elem.aspectRatio = sW / sH;
+          elem.height = Math.round(elem.width / elem.aspectRatio);
+
+          croppingElementId = null;
+          cropOverlay.remove();
+          renderCanvasElements();
+          renderSidebarList();
+          updateSelectedUI();
+          showNotification('Crop applied successfully!', 'success');
+        } catch (err) {
+          console.error('Crop error:', err);
+          showNotification('Could not crop image: ' + err.message, 'error');
+          croppingElementId = null;
+          cropOverlay.remove();
+          renderCanvasElements();
+        }
+      });
+
+      // Reset to Full Original Image
+      cropOverlay.querySelector('#cropResetBtn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        saveState();
+        elem.url = elem.originalUrl || elem.url;
+
+        const img = new Image();
+        img.onload = () => {
+          elem.aspectRatio = img.naturalWidth / img.naturalHeight;
+          elem.height = Math.round(elem.width / elem.aspectRatio);
+          croppingElementId = null;
+          cropOverlay.remove();
+          renderCanvasElements();
+          renderSidebarList();
+          updateSelectedUI();
+          showNotification('Reset to full original image.', 'info');
+        };
+        img.src = elem.url;
+      });
+
+      // Cancel Crop
+      cropOverlay.querySelector('#cropCancelBtn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        croppingElementId = null;
+        cropOverlay.remove();
+        renderCanvasElements();
+      });
+    }
+
+    // Sidebar crop button triggers in-place crop
+    document.getElementById('f4SidebarCropBtn')?.addEventListener('click', () => {
+      const selected = elements.find(el => el.id === selectedElementId);
+      if (selected) {
+        startInPlaceCrop(selected);
+      }
+    });
 
     // Sidebar list
     function renderSidebarList() {
       const list = document.getElementById('f4ElementsList');
+      const countEl = document.getElementById('f4ImagesCount');
+      if (countEl) countEl.textContent = elements.length;
       if (!list) return;
 
       if (elements.length === 0) {
-        list.innerHTML = `<p class="text-xs text-muted" style="padding:10px 0;">No images placed on canvas.</p>`;
+        list.innerHTML = `<p class="text-xs text-muted" style="padding:10px 0;">No images placed on page.</p>`;
         return;
       }
 
-      list.innerHTML = elements.map((elem, idx) => `
-        <div class="a4-element-row ${elem.id === selectedElementId ? 'active' : ''}" data-elem-id="${elem.id}">
-          <div style="width:36px;height:24px;overflow:hidden;border-radius:3px;border:1px solid var(--border-subtle);flex-shrink:0;">
-            <img src="${escapeHtml(elem.url)}" style="width:100%;height:100%;object-fit:cover;" />
+      list.innerHTML = elements.map((elem, idx) => {
+        const sideLabel = idx === 0 ? 'Front' : (idx === 1 ? 'Back' : `Card ${idx + 1}`);
+        return `
+          <div class="a4-element-row ${elem.id === selectedElementId ? 'active' : ''}" data-elem-id="${elem.id}">
+            <div style="width:36px;height:24px;overflow:hidden;border-radius:3px;border:1px solid var(--border-subtle);flex-shrink:0;">
+              <img src="${escapeHtml(elem.url)}" style="width:100%;height:100%;object-fit:cover;" />
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="font-mono text-xs truncate" style="font-weight:600;">${escapeHtml(elem.name)}</div>
+              <div class="text-xs text-muted">#${idx + 1} &bull; ${sideLabel}</div>
+            </div>
+            <button type="button" class="btn btn-xs btn-ghost text-muted remove-single-f4-elem" data-id="${elem.id}" title="Remove">&times;</button>
           </div>
-          <div style="flex:1;min-width:0;">
-            <div class="font-mono text-xs truncate">${escapeHtml(elem.name)}</div>
-            <div class="text-xs text-muted">ID Item #${idx + 1}</div>
-          </div>
-          <button type="button" class="btn btn-xs btn-ghost text-muted remove-single-f4-elem" data-id="${elem.id}" title="Remove">&times;</button>
-        </div>
-      `).join('');
+        `;
+      }).join('');
 
       list.querySelectorAll('.a4-element-row').forEach(row => {
         row.addEventListener('click', (e) => {
@@ -1487,6 +2003,7 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
     function updateSelectedUI() {
       const section = document.getElementById('f4SelectedControls');
       const selected = elements.find(el => el.id === selectedElementId);
+      const badge = document.getElementById('f4SelectedCardBadge');
 
       if (!selected || !section) {
         if (section) section.style.display = 'none';
@@ -1494,6 +2011,11 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
       }
 
       section.style.display = 'block';
+      const idx = elements.findIndex(el => el.id === selected.id);
+      if (badge) {
+        badge.textContent = idx === 0 ? '#1 Front' : (idx === 1 ? '#2 Back' : `#${idx + 1}`);
+      }
+
       const slider = document.getElementById('f4ScaleSlider');
       const scaleLabel = document.getElementById('f4ScaleLabel');
       if (slider) slider.value = selected.scale || 100;
@@ -1512,7 +2034,7 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
 
     document.getElementById('f4ScaleMinus')?.addEventListener('click', () => {
       const selected = elements.find(el => el.id === selectedElementId);
-      if (selected && selected.scale > 20) {
+      if (selected && selected.scale > 30) {
         saveState();
         selected.scale -= 10;
         updateSelectedUI();
@@ -1522,7 +2044,7 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
 
     document.getElementById('f4ScalePlus')?.addEventListener('click', () => {
       const selected = elements.find(el => el.id === selectedElementId);
-      if (selected && selected.scale < 300) {
+      if (selected && selected.scale < 250) {
         saveState();
         selected.scale += 10;
         updateSelectedUI();
@@ -1586,8 +2108,8 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
       const selected = elements.find(el => el.id === selectedElementId);
       if (selected) {
         saveState();
-        selected.x = 40;
-        selected.y = 40;
+        selected.x = 35;
+        selected.y = 60;
         selected.scale = 100;
         selected.rotation = 0;
         renderCanvasElements();
@@ -1615,20 +2137,20 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
         id: 'elem_' + Math.random().toString(36).substring(2, 9),
         name: file.name,
         url: objUrl,
-        x: 50,
-        y: 50,
-        width: 200,
-        height: 130,
+        originalUrl: objUrl,
+        x: 40,
+        y: 80,
+        width: 170,
+        height: 108,
         rotation: 0,
         scale: 100,
-        aspectRatio: 1.58
+        aspectRatio: 1.585
       };
 
       const testImg = new Image();
       testImg.onload = () => {
         if (testImg.naturalWidth && testImg.naturalHeight) {
           newElem.aspectRatio = testImg.naturalWidth / testImg.naturalHeight;
-          newElem.width = Math.min(260, Math.round(140 * newElem.aspectRatio));
           newElem.height = Math.round(newElem.width / newElem.aspectRatio);
         }
         saveState();
@@ -1642,10 +2164,29 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
       e.target.value = '';
     });
 
-    // Initial render
+    // Keyboard Shortcuts (Ctrl+Z, Ctrl+Y)
+    const onKeyDown = (evt) => {
+      if (!document.getElementById(modalId)) {
+        window.removeEventListener('keydown', onKeyDown);
+        return;
+      }
+      if (evt.target.tagName === 'INPUT') return;
+
+      if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'z') {
+        evt.preventDefault();
+        document.getElementById('f4UndoBtn')?.click();
+      } else if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'y') {
+        evt.preventDefault();
+        document.getElementById('f4RedoBtn')?.click();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+
+    // Initial render & Auto-fit
     updateSheetSize();
     renderSidebarList();
     updateSelectedUI();
+    setTimeout(fitToPage, 80);
 
     // High-Resolution 300 DPI Export & Save to Print Queue
     document.getElementById('f4SaveAndApplyBtn')?.addEventListener('click', async () => {
