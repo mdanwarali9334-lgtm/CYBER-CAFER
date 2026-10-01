@@ -231,13 +231,18 @@ export async function uploadCustomerPrintDocument(file, cafeIdOrIdentifier = 'te
         upsert: false
       });
 
-    if (error) throw error;
+    if (error) {
+      console.error('[Upload] Storage upload failed:', error.message, '| File:', file.name, '| Path:', filePath);
+      throw error;
+    }
+    console.log('[Upload] File uploaded successfully to private bucket:', data.path);
     return { success: true, filePath: data.path, fileName: file.name, fileSize: file.size, fileType: file.type };
   } catch (err) {
-    console.error('File upload error:', err);
+    console.error('[Upload] uploadCustomerPrintDocument exception:', err.message, '| File:', file.name);
     return { success: false, error: err.message || 'Failed to upload document.' };
   }
 }
+
 
 /**
  * Submit a customer print order using Cafe QR identifier with server-side pricing

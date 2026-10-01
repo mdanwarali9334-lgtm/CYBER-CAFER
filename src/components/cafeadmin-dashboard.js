@@ -954,13 +954,30 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
       return;
     }
 
-    if (!job.file_url || job.file_url.startsWith('spool://')) {
+    // Resolve best available storage path:
+    // 1. Use file_url if it's a real storage path (not spool://)
+    // 2. Fall back to files_metadata[].storage_path for any file that has one
+    let resolvedPath = null;
+    if (job.file_url && !job.file_url.startsWith('spool://') && job.file_url !== '[PURGED]') {
+      resolvedPath = job.file_url;
+    } else {
+      // Try to find storage_path in files_metadata array
+      const meta = Array.isArray(job.files_metadata) ? job.files_metadata : [];
+      for (const f of meta) {
+        if (f.storage_path && f.storage_path.length > 0) {
+          resolvedPath = f.storage_path;
+          break;
+        }
+      }
+    }
+
+    if (!resolvedPath) {
       showNotification('Document is spooled directly on the local counter PC. Cloud preview is unavailable.', 'info');
       return;
     }
 
     showNotification('Generating secure signed preview...', 'info');
-    const signedRes = await fetchJobSignedPreviewUrl(job.file_url);
+    const signedRes = await fetchJobSignedPreviewUrl(resolvedPath);
 
     if (!signedRes.success || !signedRes.signedUrl) {
       showNotification('Preview unavailable for this file.', 'warning');

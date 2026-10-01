@@ -834,8 +834,12 @@ function renderPortalMain(container, { cafe, can_print, status_message, pricing,
       const preparedFilesMeta = [];
 
       for (const item of uploadedFiles) {
-        // Upload each file
+        // Upload each file to private Supabase Storage
+        if (label) label.textContent = `Uploading ${item.name}...`;
         const upRes = await uploadCustomerPrintDocument(item.file, cafe.id || identifier);
+        if (!upRes.success) {
+          throw new Error(`Could not upload "${item.name}" to secure storage. Please check your connection and try again. (${upRes.error || 'Upload failed'})`);
+        }
         preparedFilesMeta.push({
           name: item.name,
           size: item.size,
@@ -846,9 +850,10 @@ function renderPortalMain(container, { cafe, can_print, status_message, pricing,
           duplex,
           orientation,
           page_range: pageRange,
-          storage_path: upRes.success ? upRes.filePath : null
+          storage_path: upRes.filePath
         });
       }
+
 
       // 2. Submit order to backend RPC
       const orderPayload = {
