@@ -7,7 +7,7 @@ echo ========================================================
 echo.
 
 :: 1. Configuration & Web App Location
-set "APP_WEB_URL=http://localhost:5173"
+if "%APP_WEB_URL%"=="" set "APP_WEB_URL=https://cyber-cafer.onrender.com"
 set "INSTALL_DIR=%LOCALAPPDATA%\PressPointPrintAgent"
 echo [*] Installing to: %INSTALL_DIR%
 echo [*] Web Application Location: %APP_WEB_URL%
