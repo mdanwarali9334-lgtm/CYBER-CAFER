@@ -6406,4 +6406,89 @@ html[data-theme="dark"] .admin-topbar {
   }
 }
 
+/* Print Queue Tabs & Order Details Modal Styles */
+.jobs-filter-tabs-bar {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
 
+.jobs-filter-tabs-bar::-webkit-scrollbar {
+  height: 4px;
+}
+
+.jobs-filter-tabs-bar::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: 4px;
+}
+
+.filter-tab-pill {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.order-details-modal-card {
+  max-width: 680px;
+  width: 95vw;
+}
+
+.order-details-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+@media (max-width: 640px) {
+  .order-details-grid {
+    grid-template-columns: 1fr;
+  }
+  .order-details-modal-card {
+    padding: 20px;
+  }
+}
+
+.order-details-section {
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+}
+
+.order-details-section h4 {
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detail-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  font-size: 0.85rem;
+  border-bottom: 1px dashed var(--border-subtle);
+}
+
+.detail-item-row:last-child {
+  border-bottom: none;
+}
+
+.detail-item-label {
+  color: var(--text-secondary);
+}
+
+.detail-item-value {
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: right;
+}

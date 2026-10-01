@@ -17,6 +17,7 @@ import {
   manageCafeJob,
   fetchJobSignedPreviewUrl
 } from '../lib/cafeadmin.js';
+import { supabase } from '../lib/supabase.js';
 import { signOut } from '../lib/auth.js';
 import QRCode from 'qrcode';
 
@@ -122,8 +123,18 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
     </div>
   `;
 
+  // Realtime & Polling handles
+  let pollInterval = null;
+  let realtimeChannel = null;
+
+  const cleanupListeners = () => {
+    if (pollInterval) clearInterval(pollInterval);
+    if (realtimeChannel) supabase.removeChannel(realtimeChannel);
+  };
+
   // Attach Sign Out
   document.getElementById('cafeSignOutBtn')?.addEventListener('click', async () => {
+    cleanupListeners();
     await signOut();
     window.navigateTo('/login');
   });
@@ -144,16 +155,18 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
   else if (currentPath.includes('setting') && !isStaff) activeTab = 'settings';
   else activeTab = isStaff ? 'jobs' : 'overview';
 
-  async function loadData() {
+  async function loadData(silent = false) {
     const res = await fetchCafeDashboardData(cafeId);
     if (!res.success) {
-      document.getElementById('cafeTabContent').innerHTML = `
-        <div class="alert-box alert-error">
-          <p><strong>Failed to load Cafe data:</strong> ${res.error}</p>
-          <button class="btn btn-sm btn-secondary mt-3" id="retryLoadBtn">Retry</button>
-        </div>
-      `;
-      document.getElementById('retryLoadBtn')?.addEventListener('click', loadData);
+      if (!silent) {
+        document.getElementById('cafeTabContent').innerHTML = `
+          <div class="alert-box alert-error">
+            <p><strong>Failed to load Cafe data:</strong> ${res.error}</p>
+            <button class="btn btn-sm btn-secondary mt-3" id="retryLoadBtn">Retry</button>
+          </div>
+        `;
+        document.getElementById('retryLoadBtn')?.addEventListener('click', () => loadData(false));
+      }
       return;
     }
     dashboardData = res.data;
@@ -164,8 +177,55 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
       nameEl.textContent = `${dashboardData.cafe.name.toUpperCase()} • ${dashboardData.cafe.status.toUpperCase()}`;
     }
 
+    // Update Print Jobs tab badge dynamically
+    const activeJobs = (dashboardData.jobs || []).filter(j =>
+      ['pending', 'queued', 'assigned', 'downloading', 'printing'].includes(j.status)
+    );
+    const badgeEl = document.getElementById('tabJobsBadge');
+    if (badgeEl) {
+      if (activeJobs.length > 0) {
+        badgeEl.textContent = activeJobs.length;
+        badgeEl.style.display = 'inline-block';
+      } else {
+        badgeEl.style.display = 'none';
+      }
+    }
+
+    // In silent refresh, avoid re-rendering DOM if operator is currently typing or interacting with a modal
+    if (silent) {
+      const activeEl = document.activeElement;
+      const isTyping = activeEl && (activeEl.id === 'jobsSearchInput' || activeEl.tagName === 'INPUT' || activeEl.tagName === 'SELECT');
+      const isModalOpen = document.getElementById('cafeModalContainer')?.style.display === 'flex' ||
+                          document.getElementById('adminPreviewModal') ||
+                          document.getElementById('orderDetailsModal');
+      if (isModalOpen || isTyping) {
+        return;
+      }
+    }
+
     renderActiveTab();
   }
+
+  // Subscribe to real-time changes on print_jobs for immediate reactivity
+  try {
+    realtimeChannel = supabase
+      .channel(`cafe-live-jobs-${cafeId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'print_jobs', filter: `cafe_id=eq.${cafeId}` },
+        () => {
+          loadData(true);
+        }
+      )
+      .subscribe();
+  } catch (err) {
+    console.warn('[Realtime] Could not subscribe to print_jobs channel:', err);
+  }
+
+  // 10-second polling fallback in case websockets are firewalled
+  pollInterval = setInterval(() => {
+    loadData(true);
+  }, 10000);
 
   // Tab switcher
   const tabButtons = container.querySelectorAll('.admin-tab-btn');
@@ -545,7 +605,7 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
                       class="badge-toggle-payment payment-badge-${j.payment_status || 'unpaid'} font-mono" 
                       data-job-id="${j.id}" 
                       data-current-payment="${j.payment_status || 'unpaid'}"
-                      title="Click to toggle payment status"
+                      ${j.status === 'cancelled' ? 'disabled title="Payment locked for cancelled orders"' : 'title="Click to toggle payment status"'}
                     >
                       ${(j.payment_status || 'unpaid').toUpperCase()}
                     </button>
@@ -580,7 +640,7 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
                   </div>
 
                   ${j.error_message ? `
-                    <div class="job-error-notice font-mono text-xs text-danger mt-2">
+                    <div class="job-error-notice font-mono text-xs text-danger mt-2" style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);padding:6px 10px;border-radius:6px;">
                       ⚠️ ${escapeHtml(j.error_message)}
                     </div>
                   ` : ''}
@@ -598,10 +658,18 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
 
                 <!-- Actions Bar -->
                 <div class="job-card-actions">
+                  <button class="btn btn-sm btn-ghost view-job-details-btn" data-job-id="${j.id}" title="View Complete Order Details">
+                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" style="width:13px;height:13px;margin-right:4px;">
+                      <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
+                      <path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clip-rule="evenodd"/>
+                    </svg>
+                    Details
+                  </button>
+
                   ${!isCompletedOrPurged ? `
                     <button class="btn btn-sm btn-secondary preview-job-btn" data-job-id="${j.id}" title="Inspect and verify document">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;margin-right:4px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                      Preview Document
+                      Preview
                     </button>
                   ` : `
                     <span class="text-xs font-mono text-muted" title="File was purged after completion for customer privacy">
@@ -609,7 +677,16 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
                     </span>
                   `}
 
-                  ${['pending', 'queued', 'failed'].includes(j.status) ? `
+                  ${j.status === 'failed' ? `
+                    <button class="btn btn-sm btn-primary retry-job-btn" data-job-id="${j.id}" title="Reset and re-queue failed job">
+                      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" style="width:13px;height:13px;margin-right:4px;">
+                        <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                      </svg>
+                      Retry Job
+                    </button>
+                  ` : ''}
+
+                  ${['pending', 'queued'].includes(j.status) ? `
                     <button class="btn btn-sm btn-primary send-to-print-btn" data-job-id="${j.id}">
                       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" style="width:13px;height:13px;margin-right:4px;">
                         <path d="M5 7V3h10v4M5 13H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-2M5 11h10v6H5v-6z"/>
@@ -669,10 +746,34 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
       renderJobsTab(content, data);
     });
 
-    document.getElementById('refreshJobsBtn')?.addEventListener('click', loadData);
+    document.getElementById('refreshJobsBtn')?.addEventListener('click', () => loadData(false));
     document.getElementById('jobsQueueTestBtn')?.addEventListener('click', handleQuickTestPrint);
 
+    // Large job warning helper
+    const confirmLargeJob = (job) => {
+      const totalSheets = (Number(job.pages) || 1) * (Number(job.copies) || 1);
+      if (totalSheets >= 30 || Number(job.total_price) >= 100) {
+        return confirm(
+          `⚠️ Large Print Order Confirmation:\n\n` +
+          `Order: ${job.order_number || job.job_number}\n` +
+          `Total Output: ${totalSheets} sheets (${job.pages} pages × ${job.copies} copies)\n` +
+          `Total Cost: ₹${Number(job.total_price).toFixed(2)}\n\n` +
+          `Please ensure the counter printer paper tray is stocked with paper and toner/ink is sufficient before spooling.\n\n` +
+          `Proceed to print?`
+        );
+      }
+      return true;
+    };
+
     // Job Card Action Listeners
+    content.querySelectorAll('.view-job-details-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const jId = btn.getAttribute('data-job-id');
+        const job = allJobs.find(j => j.id === jId);
+        if (job) openOrderDetailsModal(job);
+      });
+    });
+
     content.querySelectorAll('.preview-job-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const jId = btn.getAttribute('data-job-id');
@@ -684,6 +785,9 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
     content.querySelectorAll('.send-to-print-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const jId = btn.getAttribute('data-job-id');
+        const job = allJobs.find(j => j.id === jId);
+        if (job && !confirmLargeJob(job)) return;
+
         btn.disabled = true;
         const res = await manageCafeJob(cafeId, jId, 'send_to_print');
         if (!res.success) {
@@ -691,6 +795,24 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
           btn.disabled = false;
         } else {
           showNotification(res.message || 'Job dispatched to print queue.', res.device_id ? 'success' : 'warning');
+          await loadData();
+        }
+      });
+    });
+
+    content.querySelectorAll('.retry-job-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const jId = btn.getAttribute('data-job-id');
+        const job = allJobs.find(j => j.id === jId);
+        if (job && !confirmLargeJob(job)) return;
+
+        btn.disabled = true;
+        const res = await manageCafeJob(cafeId, jId, 'retry');
+        if (!res.success) {
+          showNotification(res.error || 'Failed to retry job.', 'error');
+          btn.disabled = false;
+        } else {
+          showNotification('Job reset to pending for retry.', 'success');
           await loadData();
         }
       });
@@ -737,6 +859,291 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
           showNotification(res.error || 'Failed to cancel job.', 'error');
         }
       });
+    });
+  }
+
+  // ----------------------------------------------------
+  // ORDER DETAILS MODAL
+  // ----------------------------------------------------
+  function openOrderDetailsModal(job) {
+    const modalId = 'orderDetailsModal';
+    let existing = document.getElementById(modalId);
+    if (existing) existing.remove();
+
+    const devObj = (dashboardData?.devices || []).find(d => d.id === job.device_id);
+    const devLabel = devObj ? (devObj.device_label || 'Counter PC') : (job.device_id ? 'Print PC' : 'Unassigned');
+    const isDevOnline = devObj ? (devObj.last_seen_at && (new Date() - new Date(devObj.last_seen_at) < 600000)) : false;
+    const isCompletedOrPurged = job.status === 'completed' || job.status === 'cancelled' || job.file_url === '[PURGED]';
+    const totalSheets = (Number(job.pages) || 1) * (Number(job.copies) || 1);
+
+    const modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'admin-modal-backdrop';
+    modal.style.display = 'flex';
+
+    modal.innerHTML = `
+      <div class="admin-modal-card order-details-modal-card">
+        <div class="modal-header">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span class="pill-tag font-mono">ORDER SPECIFICATION</span>
+              <span class="job-status-pill status-${job.status} font-mono text-xs">${job.status.toUpperCase()}</span>
+              <span class="payment-badge-${job.payment_status || 'unpaid'} font-mono text-xs" style="padding:2px 8px;border-radius:12px;">
+                ${(job.payment_status || 'unpaid').toUpperCase()}
+              </span>
+            </div>
+            <h3 class="modal-title font-mono mt-2" style="font-size:1.3rem;">${escapeHtml(job.order_number || job.job_number)}</h3>
+            <span class="text-xs text-muted font-mono">Internal ID: ${escapeHtml(job.job_number)}</span>
+          </div>
+          <button class="modal-close-btn close-order-modal-btn" aria-label="Close Modal">&times;</button>
+        </div>
+
+        <div class="order-details-grid">
+          <!-- Section 1: Customer Info -->
+          <div class="order-details-section">
+            <h4>
+              <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px;"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>
+              Customer Info
+            </h4>
+            <div class="detail-item-row">
+              <span class="detail-item-label">Name</span>
+              <span class="detail-item-value">${escapeHtml(job.customer_name || 'Guest Customer')}</span>
+            </div>
+            <div class="detail-item-row">
+              <span class="detail-item-label">Phone</span>
+              <span class="detail-item-value font-mono">
+                ${job.customer_phone ? `<a href="tel:${escapeHtml(job.customer_phone)}" style="color:var(--text-accent);">${escapeHtml(job.customer_phone)}</a>` : 'Not provided'}
+              </span>
+            </div>
+            <div class="detail-item-row">
+              <span class="detail-item-label">Submitted</span>
+              <span class="detail-item-value font-mono text-xs">${new Date(job.created_at).toLocaleString()}</span>
+            </div>
+            ${job.completed_at ? `
+              <div class="detail-item-row">
+                <span class="detail-item-label">Completed</span>
+                <span class="detail-item-value font-mono text-xs">${new Date(job.completed_at).toLocaleString()}</span>
+              </div>
+            ` : ''}
+          </div>
+
+          <!-- Section 2: Financials & Payment -->
+          <div class="order-details-section">
+            <h4>
+              <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px;"><path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 4a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/></svg>
+              Financial & Payment
+            </h4>
+            <div class="detail-item-row">
+              <span class="detail-item-label">Order Total</span>
+              <span class="detail-item-value font-mono font-bold text-accent" style="font-size:1.1rem;">₹${Number(job.total_price).toFixed(2)}</span>
+            </div>
+            <div class="detail-item-row">
+              <span class="detail-item-label">Payment Status</span>
+              <span class="detail-item-value font-mono">
+                <span class="payment-badge-${job.payment_status || 'unpaid'} text-xs" style="padding:2px 8px;border-radius:8px;">
+                  ${(job.payment_status || 'unpaid').toUpperCase()}
+                </span>
+              </span>
+            </div>
+            ${job.status !== 'cancelled' ? `
+              <div class="mt-3 text-right">
+                <button class="btn btn-sm btn-secondary modal-toggle-pay-btn" data-job-id="${job.id}">
+                  Mark as ${job.payment_status === 'paid' ? 'UNPAID' : 'PAID'}
+                </button>
+              </div>
+            ` : ''}
+          </div>
+
+          <!-- Section 3: Print Options -->
+          <div class="order-details-section">
+            <h4>
+              <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px;"><path fill-rule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a2 2 0 002 2h6a2 2 0 002-2v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a2 2 0 00-2-2H7a2 2 0 00-2 2zm8 0H7v3h6V4zm0 8H7v4h6v-4z" clip-rule="evenodd"/></svg>
+              Print Specifications
+            </h4>
+            <div class="detail-item-row">
+              <span class="detail-item-label">File</span>
+              <span class="detail-item-value font-mono text-xs" title="${escapeHtml(job.file_name)}" style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                ${escapeHtml(job.file_name)}
+              </span>
+            </div>
+            <div class="detail-item-row">
+              <span class="detail-item-label">Document Pages</span>
+              <span class="detail-item-value font-mono">${job.pages} page${job.pages > 1 ? 's' : ''}</span>
+            </div>
+            <div class="detail-item-row">
+              <span class="detail-item-label">Quantity (Copies)</span>
+              <span class="detail-item-value font-mono">${job.copies}</span>
+            </div>
+            <div class="detail-item-row">
+              <span class="detail-item-label">Total Printed Sheets</span>
+              <span class="detail-item-value font-mono font-bold">${totalSheets} sheets</span>
+            </div>
+            <div class="detail-item-row">
+              <span class="detail-item-label">Color Mode</span>
+              <span class="detail-item-value font-mono">${job.color_mode === 'color' ? 'Full Colour' : 'Black & White'}</span>
+            </div>
+            <div class="detail-item-row">
+              <span class="detail-item-label">Duplex</span>
+              <span class="detail-item-value font-mono">${job.duplex === 'double' ? 'Double-sided (2-sided)' : 'Single-sided (1-sided)'}</span>
+            </div>
+            <div class="detail-item-row">
+              <span class="detail-item-label">Orientation</span>
+              <span class="detail-item-value font-mono">${(job.orientation || 'portrait').toUpperCase()}</span>
+            </div>
+            ${job.page_range && job.page_range !== 'all' ? `
+              <div class="detail-item-row">
+                <span class="detail-item-label">Page Range</span>
+                <span class="detail-item-value font-mono">${escapeHtml(job.page_range)}</span>
+              </div>
+            ` : ''}
+          </div>
+
+          <!-- Section 4: Hardware & Spool Status -->
+          <div class="order-details-section">
+            <h4>
+              <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px;"><path fill-rule="evenodd" d="M3 5a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2h-2.22l.123.489.804.804A1 1 0 0113 18H7a1 1 0 01-.707-1.707l.804-.804L7.22 15H5a2 2 0 01-2-2V5zm5.771 7H5V5h10v7H8.771z" clip-rule="evenodd"/></svg>
+              Spool & Hardware Dispatch
+            </h4>
+            <div class="detail-item-row">
+              <span class="detail-item-label">Assigned Workstation</span>
+              <span class="detail-item-value font-mono">${escapeHtml(devLabel)}</span>
+            </div>
+            <div class="detail-item-row">
+              <span class="detail-item-label">Workstation Status</span>
+              <span class="detail-item-value font-mono">
+                ${isDevOnline ? `<span style="color:#059669;">● Online</span>` : `<span style="color:#f59e0b;">○ Offline</span>`}
+              </span>
+            </div>
+            <div class="detail-item-row">
+              <span class="detail-item-label">Assigned Printer</span>
+              <span class="detail-item-value font-mono text-xs">${escapeHtml(devObj?.selected_printer || 'System Default')}</span>
+            </div>
+            <div class="detail-item-row">
+              <span class="detail-item-label">Privacy State</span>
+              <span class="detail-item-value font-mono text-xs text-muted">
+                ${isCompletedOrPurged ? '🔒 File Purged' : 'Active (Private Storage)'}
+              </span>
+            </div>
+            ${job.error_message ? `
+              <div class="alert-box alert-error mt-3" style="padding:8px 12px;font-size:0.8rem;">
+                <strong>Printer Error:</strong> ${escapeHtml(job.error_message)}
+              </div>
+            ` : ''}
+          </div>
+        </div>
+
+        <div class="modal-actions mt-6" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+          <div>
+            ${!isCompletedOrPurged ? `
+              <button class="btn btn-secondary modal-preview-doc-btn">
+                Preview Document
+              </button>
+            ` : ''}
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            ${job.status === 'failed' ? `
+              <button class="btn btn-primary modal-retry-job-btn">
+                Retry Job
+              </button>
+            ` : ''}
+            ${['pending', 'queued'].includes(job.status) ? `
+              <button class="btn btn-primary modal-send-print-btn">
+                Send to Print
+              </button>
+            ` : ''}
+            ${!isCompletedOrPurged ? `
+              <button class="btn btn-ghost modal-complete-job-btn">
+                &check; Complete
+              </button>
+              <button class="btn btn-ghost text-danger modal-cancel-job-btn">
+                Cancel
+              </button>
+            ` : ''}
+            <button class="btn btn-secondary close-order-modal-btn">Close</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const closeModal = () => modal.remove();
+    modal.querySelectorAll('.close-order-modal-btn').forEach(b => b.addEventListener('click', closeModal));
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+    modal.querySelector('.modal-toggle-pay-btn')?.addEventListener('click', async () => {
+      const next = job.payment_status === 'paid' ? 'unpaid' : 'paid';
+      const res = await manageCafeJob(cafeId, job.id, 'update_payment', { paymentStatus: next });
+      if (res.success) {
+        showNotification(`Payment marked as ${next.toUpperCase()}`, 'success');
+        closeModal();
+        loadData();
+      } else {
+        showNotification(res.error || 'Failed to update payment.', 'error');
+      }
+    });
+
+    modal.querySelector('.modal-preview-doc-btn')?.addEventListener('click', () => {
+      closeModal();
+      openAdminDocumentPreview(job);
+    });
+
+    modal.querySelector('.modal-send-print-btn')?.addEventListener('click', async () => {
+      const totalSheets = (Number(job.pages) || 1) * (Number(job.copies) || 1);
+      if (totalSheets >= 30 || Number(job.total_price) >= 100) {
+        const ok = confirm(
+          `⚠️ Large Print Order Confirmation:\n\n` +
+          `Order: ${job.order_number || job.job_number}\n` +
+          `Total Output: ${totalSheets} sheets (${job.pages} pages × ${job.copies} copies)\n` +
+          `Total Cost: ₹${Number(job.total_price).toFixed(2)}\n\n` +
+          `Please ensure the counter printer paper tray is stocked with paper and toner/ink is sufficient before spooling.\n\n` +
+          `Proceed to print?`
+        );
+        if (!ok) return;
+      }
+      closeModal();
+      const res = await manageCafeJob(cafeId, job.id, 'send_to_print');
+      if (!res.success) {
+        showNotification(res.error || 'Failed to dispatch to print.', 'error');
+      } else {
+        showNotification(res.message || 'Job dispatched to print queue.', res.device_id ? 'success' : 'warning');
+        loadData();
+      }
+    });
+
+    modal.querySelector('.modal-retry-job-btn')?.addEventListener('click', async () => {
+      closeModal();
+      const res = await manageCafeJob(cafeId, job.id, 'retry');
+      if (!res.success) {
+        showNotification(res.error || 'Failed to retry job.', 'error');
+      } else {
+        showNotification('Job reset to pending for retry.', 'success');
+        loadData();
+      }
+    });
+
+    modal.querySelector('.modal-complete-job-btn')?.addEventListener('click', async () => {
+      if (!confirm('Mark job as Completed? The customer uploaded file will be permanently deleted.')) return;
+      closeModal();
+      const res = await manageCafeJob(cafeId, job.id, 'complete');
+      if (res.success) {
+        showNotification('Job marked completed and customer file purged.', 'success');
+        loadData();
+      } else {
+        showNotification(res.error || 'Failed to complete job.', 'error');
+      }
+    });
+
+    modal.querySelector('.modal-cancel-job-btn')?.addEventListener('click', async () => {
+      if (!confirm('Cancel this print job? The customer uploaded file will be permanently deleted.')) return;
+      closeModal();
+      const res = await manageCafeJob(cafeId, job.id, 'cancel');
+      if (res.success) {
+        showNotification('Job cancelled and customer file purged.', 'info');
+        loadData();
+      } else {
+        showNotification(res.error || 'Failed to cancel job.', 'error');
+      }
     });
   }
 
