@@ -1,0 +1,22 @@
+{
+  "name": "cyber-cafe-print-landing",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --env-file=.env test_step3a_auto_provisioning.mjs",
+    "test:step2": "node --env-file=.env test_auth_foundation.mjs",
+    "test:step3": "node --env-file=.env test_step3_superadmin_devices.mjs",
+    "test:step3a": "node --env-file=.env test_step3a_auto_provisioning.mjs"
+  },
+  "devDependencies": {
+    "vite": "^6.0.7"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.2",
+    "qrcode": "^1.5.4"
+  }
+}
