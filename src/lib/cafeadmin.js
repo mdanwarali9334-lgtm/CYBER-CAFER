@@ -278,3 +278,51 @@ export async function submitCustomerPrintOrder({
     return { success: false, error: err.message || 'Failed to submit print order.' };
   }
 }
+
+/**
+ * Manage Print Job (send to print, update payment, complete, cancel)
+ * @param {string} cafeId
+ * @param {string} jobId
+ * @param {string} action
+ * @param {Object} options
+ */
+export async function manageCafeJob(cafeId, jobId, action, { paymentStatus = null, deviceId = null } = {}) {
+  try {
+    const { data, error } = await supabase.rpc('cafe_admin_manage_job', {
+      p_cafe_id: cafeId,
+      p_job_id: jobId,
+      p_action: action,
+      p_payment_status: paymentStatus,
+      p_device_id: deviceId
+    });
+
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    console.error(`Manage Job (${action}) error:`, err);
+    return { success: false, error: err.message || 'Operation failed.' };
+  }
+}
+
+/**
+ * Generate a short-lived (5 min) secure signed URL for document preview
+ * @param {string} storagePath
+ */
+export async function fetchJobSignedPreviewUrl(storagePath) {
+  try {
+    if (!storagePath || storagePath === '[PURGED]' || storagePath.startsWith('spool://')) {
+      return { success: false, error: 'Document is not available for preview.' };
+    }
+
+    const cleanPath = storagePath.replace(/^print-documents\//, '');
+    const { data, error } = await supabase.storage
+      .from('print-documents')
+      .createSignedUrl(cleanPath, 300); // 5 minutes
+
+    if (error) throw error;
+    return { success: true, signedUrl: data.signedUrl };
+  } catch (err) {
+    console.error('Signed URL generation error:', err);
+    return { success: false, error: 'Preview unavailable for this file.' };
+  }
+}

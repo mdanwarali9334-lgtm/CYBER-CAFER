@@ -520,9 +520,9 @@ async function initAuthStateListener() {
         openLoginBtn.textContent = `${profile.role}: ${user.email.split('@')[0]}`;
         openLoginBtn.title = `Signed in as ${user.email} (${profile.role})`;
         openLoginBtn.onclick = () => {
-          if (profile.role === 'super_admin') window.navigateTo('/admin/audit');
-          else if (profile.role === 'cafe_admin') window.navigateTo('/cafe/settings');
-          else window.navigateTo('/staff/terminal');
+          if (profile.role === 'super_admin') window.navigateTo('/admin');
+          else if (profile.role === 'cafe_admin') window.navigateTo('/cafe');
+          else window.navigateTo('/staff');
         };
       }
     } else {

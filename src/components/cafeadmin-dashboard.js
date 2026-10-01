@@ -13,12 +13,14 @@ import {
   createDevicePairingCode,
   selectDevicePrinter,
   revokeDevice,
-  createTestPrintJob
+  createTestPrintJob,
+  manageCafeJob,
+  fetchJobSignedPreviewUrl
 } from '../lib/cafeadmin.js';
 import { signOut } from '../lib/auth.js';
 import QRCode from 'qrcode';
 
-export async function renderCafeAdminDashboard(container, { user, profile }) {
+export async function renderCafeAdminDashboard(container, { user, profile, isStaff = false } = {}) {
   const cafeId = profile?.cafe_id;
 
   if (!cafeId) {
@@ -64,7 +66,7 @@ export async function renderCafeAdminDashboard(container, { user, profile }) {
             </span>
             <div class="admin-brand-info">
               <span class="admin-brand-title">PressPoint</span>
-              <span class="admin-brand-sub font-mono">CAFE ADMIN WORKSTATION</span>
+              <span class="admin-brand-sub font-mono">${isStaff ? 'CAFE STAFF TERMINAL' : 'CAFE ADMIN WORKSTATION'}</span>
             </div>
           </a>
           <div class="admin-status-badge">
@@ -75,8 +77,8 @@ export async function renderCafeAdminDashboard(container, { user, profile }) {
 
         <div class="admin-topbar-right">
           <div class="admin-user-pill">
-            <span class="admin-user-role font-mono">CAFE_ADMIN</span>
-            <span class="admin-user-email">${user?.email || 'admin@cafe.com'}</span>
+            <span class="admin-user-role font-mono">${isStaff ? 'STAFF' : 'CAFE_ADMIN'}</span>
+            <span class="admin-user-email">${user?.email || (isStaff ? 'staff@cafe.com' : 'admin@cafe.com')}</span>
           </div>
           <button class="btn btn-sm btn-ghost" id="cafeSignOutBtn" title="Sign out of Cafe workstation">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" style="width:14px;height:14px;"><path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3M10 11l3-3-3-3M13 8H5"/></svg>
@@ -88,14 +90,22 @@ export async function renderCafeAdminDashboard(container, { user, profile }) {
       <!-- Dashboard Navigation Tabs -->
       <nav class="admin-tabs-nav" aria-label="Cafe Admin Sections">
         <div class="site-container admin-tabs-container">
-          <button class="admin-tab-btn active" data-tab="overview">Overview</button>
+          ${!isStaff ? `<button class="admin-tab-btn" data-tab="overview">Overview</button>` : ''}
+          <button class="admin-tab-btn" data-tab="jobs">
+            Print Jobs
+            <span class="tab-badge" id="tabJobsBadge" style="display:none;background:#2563eb;color:#fff;border-radius:12px;padding:2px 7px;font-size:0.75rem;margin-left:6px;font-weight:700;">0</span>
+          </button>
+          <button class="admin-tab-btn" data-tab="history">Order History</button>
+          ${!isStaff ? `<button class="admin-tab-btn" data-tab="earnings">Earnings</button>` : ''}
           <button class="admin-tab-btn" data-tab="qrcode">Cafe QR Code</button>
-          <button class="admin-tab-btn" data-tab="devices">Print Agent / Authorized PCs</button>
-          <button class="admin-tab-btn" data-tab="pricing">Pricing</button>
-          <button class="admin-tab-btn" data-tab="staff">Staff</button>
-          <button class="admin-tab-btn" data-tab="profile">Cafe Profile</button>
-          <button class="admin-tab-btn" data-tab="license">License</button>
-          <button class="admin-tab-btn" data-tab="settings">Settings</button>
+          <button class="admin-tab-btn" data-tab="devices">Print Agent / PCs</button>
+          ${!isStaff ? `
+            <button class="admin-tab-btn" data-tab="pricing">Pricing</button>
+            <button class="admin-tab-btn" data-tab="staff">Staff</button>
+            <button class="admin-tab-btn" data-tab="profile">Cafe Profile</button>
+            <button class="admin-tab-btn" data-tab="license">License</button>
+            <button class="admin-tab-btn" data-tab="settings">Settings</button>
+          ` : ''}
         </div>
       </nav>
 
@@ -121,14 +131,18 @@ export async function renderCafeAdminDashboard(container, { user, profile }) {
   // State store
   let dashboardData = null;
   const currentPath = window.location.pathname.toLowerCase();
-  let activeTab = 'overview';
-  if (currentPath.includes('qr')) activeTab = 'qrcode';
+  let activeTab = isStaff ? 'jobs' : 'overview';
+  if (currentPath.includes('job') || currentPath.includes('print-job')) activeTab = 'jobs';
+  else if (currentPath.includes('history')) activeTab = 'history';
+  else if (currentPath.includes('earning') && !isStaff) activeTab = 'earnings';
+  else if (currentPath.includes('qr')) activeTab = 'qrcode';
   else if (currentPath.includes('device')) activeTab = 'devices';
-  else if (currentPath.includes('pricing')) activeTab = 'pricing';
-  else if (currentPath.includes('staff')) activeTab = 'staff';
-  else if (currentPath.includes('profile')) activeTab = 'profile';
-  else if (currentPath.includes('license')) activeTab = 'license';
-  else if (currentPath.includes('setting')) activeTab = 'settings';
+  else if (currentPath.includes('pricing') && !isStaff) activeTab = 'pricing';
+  else if (currentPath.includes('staff') && !isStaff) activeTab = 'staff';
+  else if (currentPath.includes('profile') && !isStaff) activeTab = 'profile';
+  else if (currentPath.includes('license') && !isStaff) activeTab = 'license';
+  else if (currentPath.includes('setting') && !isStaff) activeTab = 'settings';
+  else activeTab = isStaff ? 'jobs' : 'overview';
 
   async function loadData() {
     const res = await fetchCafeDashboardData(cafeId);
@@ -180,6 +194,15 @@ export async function renderCafeAdminDashboard(container, { user, profile }) {
       case 'overview':
         renderOverviewTab(content, dashboardData);
         break;
+      case 'jobs':
+        renderJobsTab(content, dashboardData);
+        break;
+      case 'history':
+        renderHistoryTab(content, dashboardData);
+        break;
+      case 'earnings':
+        renderEarningsTab(content, dashboardData);
+        break;
       case 'qrcode':
         renderQrTab(content, dashboardData);
         break;
@@ -202,7 +225,8 @@ export async function renderCafeAdminDashboard(container, { user, profile }) {
         renderSettingsTab(content, dashboardData);
         break;
       default:
-        renderOverviewTab(content, dashboardData);
+        if (isStaff) renderJobsTab(content, dashboardData);
+        else renderOverviewTab(content, dashboardData);
     }
   }
 
@@ -210,76 +234,80 @@ export async function renderCafeAdminDashboard(container, { user, profile }) {
   // TAB 1: OVERVIEW
   // ----------------------------------------------------
   function renderOverviewTab(content, data) {
-    const { cafe, license, pricing, stats, devices, jobs } = data;
+    const { cafe, license, pricing, stats, devices, jobs, earnings } = data;
     const maxDev = stats.max_devices || license?.max_devices || 3;
     const activeDev = stats.active_devices || 0;
+    const pendingJobsCount = (jobs || []).filter(j => ['pending', 'queued', 'assigned', 'downloading', 'printing'].includes(j.status)).length;
+    const weekEarnings = earnings?.week_earnings ? Number(earnings.week_earnings).toFixed(2) : '0.00';
 
     content.innerHTML = `
       <div class="tab-pane-fade">
         <!-- Top Metrics Row -->
-        <div class="metrics-grid">
-          <div class="metric-card">
-            <span class="metric-label font-mono">AUTHORIZED COMPUTERS</span>
-            <div class="metric-value-row">
-              <span class="metric-number">${activeDev}</span>
-              <span class="metric-capacity font-mono">/ ${maxDev} MAX</span>
+        <div class="admin-overview-grid">
+          <div class="admin-metric-card">
+            <div class="metric-header">
+              <span class="metric-title font-mono">AUTHORIZED COMPUTERS</span>
+              <span class="metric-badge font-mono ${activeDev >= maxDev ? 'text-warning' : 'text-accent'}">${activeDev}/${maxDev}</span>
             </div>
-            <span class="metric-status-sub font-mono text-accent">
-              ${activeDev >= maxDev ? 'CAPACITY REACHED' : `${maxDev - activeDev} SLOTS AVAILABLE`}
-            </span>
+            <div class="metric-value">${activeDev}</div>
+            <div class="metric-desc font-mono">
+              ${activeDev >= maxDev ? 'Capacity reached' : `${maxDev - activeDev} device slots available`}
+            </div>
           </div>
 
-          <div class="metric-card">
-            <span class="metric-label font-mono">PRINT RATES (B/W SINGLE)</span>
-            <div class="metric-value-row">
-              <span class="metric-number">₹${pricing?.bw_single || '2.00'}</span>
-              <span class="metric-capacity font-mono">/ PAGE</span>
+          <div class="admin-metric-card" style="cursor:pointer;" id="overviewActiveQueueCard">
+            <div class="metric-header">
+              <span class="metric-title font-mono">LIVE PRINT QUEUE</span>
+              <span class="metric-badge font-mono text-accent">QUEUE &rarr;</span>
             </div>
-            <span class="metric-status-sub font-mono text-green">COLOUR: ₹${pricing?.color_single || '10.00'}</span>
+            <div class="metric-value font-mono">${pendingJobsCount}</div>
+            <div class="metric-desc font-mono text-muted">
+              ${pendingJobsCount === 0 ? 'Queue is clear & ready' : `${pendingJobsCount} active job(s) pending execution`}
+            </div>
           </div>
 
-          <div class="metric-card">
-            <span class="metric-label font-mono">TOTAL STAFF MEMBERS</span>
-            <div class="metric-value-row">
-              <span class="metric-number">${stats.total_staff || 0}</span>
-              <span class="metric-capacity font-mono">ACTIVE</span>
+          <div class="admin-metric-card" style="cursor:pointer;" id="overviewEarningsCard">
+            <div class="metric-header">
+              <span class="metric-title font-mono">THIS WEEK'S EARNINGS</span>
+              <span class="metric-badge font-mono text-green">LIVE &rarr;</span>
             </div>
-            <span class="metric-status-sub font-mono text-muted">ROLE: STAFF</span>
+            <div class="metric-value font-mono">₹${weekEarnings}</div>
+            <div class="metric-desc font-mono text-muted">
+              From completed counter orders this week
+            </div>
           </div>
 
-          <div class="metric-card">
-            <span class="metric-label font-mono">LIFETIME PRINT JOBS</span>
-            <div class="metric-value-row">
-              <span class="metric-number">${stats.total_jobs || 0}</span>
-              <span class="metric-capacity font-mono">${stats.completed_jobs || 0} DONE</span>
+          <div class="admin-metric-card">
+            <div class="metric-header">
+              <span class="metric-title font-mono">PRINT RATES</span>
+              <span class="metric-badge font-mono">A4</span>
             </div>
-            <span class="metric-status-sub font-mono text-accent">QUEUE OPERATIONAL</span>
+            <div class="metric-value font-mono">₹${Number(pricing?.bw_single || 2.0).toFixed(2)}</div>
+            <div class="metric-desc font-mono text-muted">
+              B/W Single: ₹${Number(pricing?.bw_single || 2.0).toFixed(2)} &bull; Colour: ₹${Number(pricing?.color_single || 10.0).toFixed(2)}
+            </div>
           </div>
         </div>
 
         <!-- Quick Actions & Agent Status Card -->
         <div class="overview-banner-card mt-6">
           <div class="banner-content">
-            <div class="banner-tag font-mono">PRINT AGENT DEPLOYMENT</div>
-            <h2 class="editorial-h2">Windows Print Agent Station</h2>
-            <p class="auth-subtext">Install the Print Agent on your counter PC to automatically receive and print customer orders without manual file transfers.</p>
+            <div class="banner-tag font-mono">OPERATIONAL PRINT WORKSPACE</div>
+            <h2 class="editorial-h2">Counter Order Dispatcher</h2>
+            <p class="auth-subtext">Manage live customer orders, preview uploaded documents securely, and dispatch directly to authorized Windows Print PCs.</p>
             <div class="banner-actions">
-              <button class="btn btn-primary" id="overviewDownloadAgentBtn">
+              <button class="btn btn-primary" id="overviewOpenJobsBtn">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" style="width:16px;height:16px;">
+                  <path d="M5 7V3h10v4M5 13H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-2M5 11h10v6H5v-6z"/>
+                </svg>
+                <span>Open Print Jobs Queue (${pendingJobsCount})</span>
+              </button>
+              <button class="btn btn-secondary" id="overviewDownloadAgentBtn">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" style="width:16px;height:16px;"><path d="M3 13v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3M7 9l3 3 3-3M10 2v10"/></svg>
                 <span>Download Print Agent</span>
               </button>
-              <button class="btn btn-secondary" id="overviewAddPcBtn">
-                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" style="width:16px;height:16px;"><path d="M12 4v16m8-8H4"/></svg>
-                <span>Add PC (Pairing)</span>
-              </button>
               <button class="btn btn-secondary" id="overviewQrBtn">
-                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" style="width:16px;height:16px;">
-                  <rect x="3" y="3" width="5" height="5" rx="1"/>
-                  <rect x="12" y="3" width="5" height="5" rx="1"/>
-                  <rect x="3" y="12" width="5" height="5" rx="1"/>
-                  <path d="M12 12h2v2h-2zm3 0h2v2h-2zm-3 3h2v2h-2zm3 0h2v2h-2z"/>
-                </svg>
-                <span>Cafe Customer QR</span>
+                <span>Customer Counter QR</span>
               </button>
             </div>
           </div>
@@ -307,8 +335,8 @@ export async function renderCafeAdminDashboard(container, { user, profile }) {
                   <div class="device-mini-left">
                     <span class="status-indicator ${dev.status === 'authorized' ? 'online' : 'offline'}"></span>
                     <div>
-                      <strong>${dev.device_label || 'Unnamed PC'}</strong>
-                      <p class="font-mono text-muted text-xs">Printer: ${dev.selected_printer || 'No printer selected'}</p>
+                      <strong>${escapeHtml(dev.device_label || 'Unnamed PC')}</strong>
+                      <p class="font-mono text-muted text-xs">Printer: ${escapeHtml(dev.selected_printer || 'No printer selected')}</p>
                     </div>
                   </div>
                   <div class="device-mini-right font-mono text-xs text-muted">
@@ -322,7 +350,7 @@ export async function renderCafeAdminDashboard(container, { user, profile }) {
           <!-- Right: Recent Print Activity -->
           <div class="col-card">
             <div class="col-card-header">
-              <h3 class="col-card-title">Recent Print Jobs</h3>
+              <h3 class="col-card-title">Live Print Queue</h3>
               <button class="btn btn-sm btn-secondary" id="quickTestPrintBtn">+ Queue Test Print</button>
             </div>
             <div class="jobs-mini-list">
@@ -335,11 +363,11 @@ export async function renderCafeAdminDashboard(container, { user, profile }) {
                   <div class="job-mini-left">
                     <span class="job-badge font-mono ${j.status}">${j.status.toUpperCase()}</span>
                     <div>
-                      <strong>${j.file_name}</strong>
-                      <p class="text-muted text-xs font-mono">${j.pages} pgs &bull; ${j.color_mode.toUpperCase()} &bull; ₹${j.total_price}</p>
+                      <strong>${escapeHtml(j.file_name)}</strong>
+                      <p class="text-muted text-xs font-mono">${escapeHtml(j.customer_name || 'Guest')} &bull; ${j.pages} pgs &bull; ${j.color_mode.toUpperCase()} &bull; ₹${Number(j.total_price).toFixed(2)}</p>
                     </div>
                   </div>
-                  <span class="job-num font-mono text-xs">${j.job_number}</span>
+                  <span class="job-num font-mono text-xs">${escapeHtml(j.order_number || j.job_number)}</span>
                 </div>
               `).join('')}
             </div>
@@ -348,8 +376,16 @@ export async function renderCafeAdminDashboard(container, { user, profile }) {
       </div>
     `;
 
+    document.getElementById('overviewOpenJobsBtn')?.addEventListener('click', () => {
+      document.querySelector('[data-tab="jobs"]')?.click();
+    });
+    document.getElementById('overviewActiveQueueCard')?.addEventListener('click', () => {
+      document.querySelector('[data-tab="jobs"]')?.click();
+    });
+    document.getElementById('overviewEarningsCard')?.addEventListener('click', () => {
+      document.querySelector('[data-tab="earnings"]')?.click();
+    });
     document.getElementById('overviewDownloadAgentBtn')?.addEventListener('click', downloadAgentInstaller);
-    document.getElementById('overviewAddPcBtn')?.addEventListener('click', openAddPcModal);
     document.getElementById('overviewQrBtn')?.addEventListener('click', () => {
       document.querySelector('[data-tab="qrcode"]')?.click();
     });
@@ -357,6 +393,663 @@ export async function renderCafeAdminDashboard(container, { user, profile }) {
       document.querySelector('[data-tab="devices"]')?.click();
     });
     document.getElementById('quickTestPrintBtn')?.addEventListener('click', handleQuickTestPrint);
+  }
+
+  // ----------------------------------------------------
+  // TAB 1B: DEDICATED PRINT JOBS SECTION (OPERATIONAL WORKSPACE)
+  // ----------------------------------------------------
+  let jobsFilterStatus = 'all';
+  let jobsFilterSearch = '';
+  let jobsFilterPayment = 'all';
+  let jobsFilterColor = 'all';
+  let jobsFilterDuplex = 'all';
+  let jobsSortOrder = 'newest';
+
+  function renderJobsTab(content, data) {
+    const allJobs = data.jobs || [];
+    const devices = data.devices || [];
+
+    // Filter status counts
+    const pendingCount = allJobs.filter(j => j.status === 'pending').length;
+    const queuedCount = allJobs.filter(j => j.status === 'queued' || j.status === 'assigned').length;
+    const printingCount = allJobs.filter(j => j.status === 'printing' || j.status === 'downloading').length;
+    const completedCount = allJobs.filter(j => j.status === 'completed').length;
+    const failedCount = allJobs.filter(j => j.status === 'failed').length;
+    const cancelledCount = allJobs.filter(j => j.status === 'cancelled').length;
+
+    // Filter computation
+    let filtered = allJobs.filter(j => {
+      if (jobsFilterStatus === 'pending' && j.status !== 'pending') return false;
+      if (jobsFilterStatus === 'queued' && j.status !== 'queued' && j.status !== 'assigned') return false;
+      if (jobsFilterStatus === 'printing' && j.status !== 'printing' && j.status !== 'downloading') return false;
+      if (jobsFilterStatus === 'completed' && j.status !== 'completed') return false;
+      if (jobsFilterStatus === 'failed' && j.status !== 'failed') return false;
+      if (jobsFilterStatus === 'cancelled' && j.status !== 'cancelled') return false;
+
+      if (jobsFilterPayment !== 'all' && (j.payment_status || 'unpaid') !== jobsFilterPayment) return false;
+      if (jobsFilterColor !== 'all' && j.color_mode !== jobsFilterColor) return false;
+      if (jobsFilterDuplex !== 'all' && j.duplex !== jobsFilterDuplex) return false;
+
+      if (jobsFilterSearch.trim()) {
+        const q = jobsFilterSearch.toLowerCase().trim();
+        const mOrder = (j.order_number || '').toLowerCase().includes(q);
+        const mJob = (j.job_number || '').toLowerCase().includes(q);
+        const mCust = (j.customer_name || '').toLowerCase().includes(q);
+        const mFile = (j.file_name || '').toLowerCase().includes(q);
+        if (!mOrder && !mJob && !mCust && !mFile) return false;
+      }
+
+      return true;
+    });
+
+    // Sorting
+    filtered.sort((a, b) => {
+      if (jobsSortOrder === 'oldest' || jobsSortOrder === 'queue') {
+        return new Date(a.created_at) - new Date(b.created_at); // FIFO Queue order
+      }
+      return new Date(b.created_at) - new Date(a.created_at); // Newest first
+    });
+
+    content.innerHTML = `
+      <div class="tab-pane-fade">
+        <div class="section-editorial-header">
+          <div>
+            <span class="pill-tag font-mono">OPERATIONAL WORKSPACE</span>
+            <h2 class="editorial-h2">Print Jobs Queue</h2>
+            <p class="auth-subtext">Manage incoming customer print orders, inspect and preview files, verify payment, and dispatch to authorized print PCs.</p>
+          </div>
+          <div class="section-actions" style="display:flex;gap:8px;">
+            <button class="btn btn-secondary" id="refreshJobsBtn">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" style="width:14px;height:14px;"><path d="M4 4v5h5M16 16v-5h-5M15.5 6.5A7 7 0 0 0 4.5 9.5M4.5 13.5A7 7 0 0 0 15.5 10.5"/></svg>
+              <span>Refresh</span>
+            </button>
+            <button class="btn btn-primary" id="jobsQueueTestBtn">
+              <span>+ Queue Test Job</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Filters Bar: Status Tabs -->
+        <div class="jobs-filter-tabs-bar mt-4">
+          <button class="filter-tab-pill ${jobsFilterStatus === 'all' ? 'active' : ''}" data-status="all">All (${allJobs.length})</button>
+          <button class="filter-tab-pill ${jobsFilterStatus === 'pending' ? 'active' : ''}" data-status="pending">Pending (${pendingCount})</button>
+          <button class="filter-tab-pill ${jobsFilterStatus === 'queued' ? 'active' : ''}" data-status="queued">Queued (${queuedCount})</button>
+          <button class="filter-tab-pill ${jobsFilterStatus === 'printing' ? 'active' : ''}" data-status="printing">Printing (${printingCount})</button>
+          <button class="filter-tab-pill ${jobsFilterStatus === 'completed' ? 'active' : ''}" data-status="completed">Completed (${completedCount})</button>
+          <button class="filter-tab-pill ${jobsFilterStatus === 'failed' ? 'active' : ''}" data-status="failed">Failed (${failedCount})</button>
+          <button class="filter-tab-pill ${jobsFilterStatus === 'cancelled' ? 'active' : ''}" data-status="cancelled">Cancelled (${cancelledCount})</button>
+        </div>
+
+        <!-- Secondary Search & Options Bar -->
+        <div class="jobs-controls-row mt-4">
+          <div class="jobs-search-wrap">
+            <input 
+              type="text" 
+              id="jobsSearchInput" 
+              class="form-input form-input-sm" 
+              placeholder="Search by Order #, Customer, or File..." 
+              value="${escapeHtml(jobsFilterSearch)}"
+            />
+          </div>
+          <div class="jobs-selects-wrap">
+            <select id="jobsPaymentSelect" class="form-input form-input-sm">
+              <option value="all" ${jobsFilterPayment === 'all' ? 'selected' : ''}>All Payments</option>
+              <option value="paid" ${jobsFilterPayment === 'paid' ? 'selected' : ''}>Paid Only</option>
+              <option value="unpaid" ${jobsFilterPayment === 'unpaid' ? 'selected' : ''}>Unpaid Only</option>
+            </select>
+            <select id="jobsColorSelect" class="form-input form-input-sm">
+              <option value="all" ${jobsFilterColor === 'all' ? 'selected' : ''}>All Output</option>
+              <option value="bw" ${jobsFilterColor === 'bw' ? 'selected' : ''}>B/W Only</option>
+              <option value="color" ${jobsFilterColor === 'color' ? 'selected' : ''}>Colour Only</option>
+            </select>
+            <select id="jobsDuplexSelect" class="form-input form-input-sm">
+              <option value="all" ${jobsFilterDuplex === 'all' ? 'selected' : ''}>All Sides</option>
+              <option value="single" ${jobsFilterDuplex === 'single' ? 'selected' : ''}>Single-sided</option>
+              <option value="double" ${jobsFilterDuplex === 'double' ? 'selected' : ''}>Double-sided</option>
+            </select>
+            <select id="jobsSortSelect" class="form-input form-input-sm">
+              <option value="newest" ${jobsSortOrder === 'newest' ? 'selected' : ''}>Newest First</option>
+              <option value="queue" ${jobsSortOrder === 'queue' ? 'selected' : ''}>Queue Order (FIFO)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Jobs Operational List -->
+        <div class="jobs-cards-grid mt-6">
+          ${filtered.length === 0 ? `
+            <div class="empty-state-card text-center py-12">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:40px;height:40px;color:var(--text-tertiary);margin:0 auto 12px;">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+              </svg>
+              <h3 class="font-bold">No print jobs found</h3>
+              <p class="text-sm text-muted mt-1">No orders match the current filter selection.</p>
+            </div>
+          ` : filtered.map(j => {
+            const devObj = devices.find(d => d.id === j.device_id);
+            const devLabel = devObj ? (devObj.device_label || 'Counter PC') : (j.device_id ? 'Print PC' : 'Unassigned');
+            const isCompletedOrPurged = j.status === 'completed' || j.status === 'cancelled' || j.file_url === '[PURGED]';
+
+            return `
+              <div class="job-card-editorial status-border-${j.status}" data-job-id="${j.id}">
+                <div class="job-card-header">
+                  <div class="job-card-ident">
+                    <span class="job-order-num font-mono font-bold">${escapeHtml(j.order_number || j.job_number)}</span>
+                    <span class="job-id-sub font-mono text-muted text-xs">Internal ID: ${escapeHtml(j.job_number)}</span>
+                  </div>
+                  <div class="job-card-badges">
+                    <button 
+                      type="button" 
+                      class="badge-toggle-payment payment-badge-${j.payment_status || 'unpaid'} font-mono" 
+                      data-job-id="${j.id}" 
+                      data-current-payment="${j.payment_status || 'unpaid'}"
+                      title="Click to toggle payment status"
+                    >
+                      ${(j.payment_status || 'unpaid').toUpperCase()}
+                    </button>
+                    <span class="job-status-pill status-${j.status} font-mono">
+                      <span class="pill-dot"></span>
+                      ${j.status.toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="job-card-body">
+                  <div class="job-card-cust">
+                    <strong class="cust-name-text">${escapeHtml(j.customer_name || 'Guest Customer')}</strong>
+                    ${j.customer_phone ? `<span class="cust-phone-text font-mono text-xs text-muted">📞 ${escapeHtml(j.customer_phone)}</span>` : ''}
+                  </div>
+
+                  <div class="job-file-spec-row">
+                    <div class="job-file-info">
+                      <span class="file-type-icon ${j.file_name.toLowerCase().endsWith('.pdf') ? 'pdf' : 'img'} font-mono">
+                        ${j.file_name.toLowerCase().endsWith('.pdf') ? 'PDF' : 'IMG'}
+                      </span>
+                      <span class="file-name-truncate" title="${escapeHtml(j.file_name)}">${escapeHtml(j.file_name)}</span>
+                    </div>
+                    <div class="job-specs-pills font-mono text-xs">
+                      <span>${j.pages} pg${j.pages > 1 ? 's' : ''}</span>
+                      <span>${j.copies} cop${j.copies > 1 ? 'ies' : 'y'}</span>
+                      <span>${j.color_mode.toUpperCase()}</span>
+                      <span>${j.duplex.toUpperCase()}</span>
+                      <span>${(j.orientation || 'portrait').toUpperCase()}</span>
+                      ${j.page_range && j.page_range !== 'all' ? `<span>PAGES: ${escapeHtml(j.page_range)}</span>` : ''}
+                    </div>
+                  </div>
+
+                  ${j.error_message ? `
+                    <div class="job-error-notice font-mono text-xs text-danger mt-2">
+                      ⚠️ ${escapeHtml(j.error_message)}
+                    </div>
+                  ` : ''}
+
+                  <div class="job-meta-footer">
+                    <div class="job-device-info font-mono text-xs text-muted">
+                      <span>PC: ${escapeHtml(devLabel)}</span> &bull; 
+                      <span>${formatTimeAgo(j.created_at)}</span>
+                    </div>
+                    <div class="job-price-display font-mono font-bold">
+                      ₹${Number(j.total_price).toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Actions Bar -->
+                <div class="job-card-actions">
+                  ${!isCompletedOrPurged ? `
+                    <button class="btn btn-sm btn-secondary preview-job-btn" data-job-id="${j.id}" title="Inspect and verify document">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;margin-right:4px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                      Preview Document
+                    </button>
+                  ` : `
+                    <span class="text-xs font-mono text-muted" title="File was purged after completion for customer privacy">
+                      🔒 File Purged
+                    </span>
+                  `}
+
+                  ${['pending', 'queued', 'failed'].includes(j.status) ? `
+                    <button class="btn btn-sm btn-primary send-to-print-btn" data-job-id="${j.id}">
+                      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" style="width:13px;height:13px;margin-right:4px;">
+                        <path d="M5 7V3h10v4M5 13H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-2M5 11h10v6H5v-6z"/>
+                      </svg>
+                      Send to Print
+                    </button>
+                  ` : ''}
+
+                  ${!isCompletedOrPurged ? `
+                    <button class="btn btn-sm btn-ghost mark-complete-btn" data-job-id="${j.id}" title="Mark completed and purge customer file">
+                      &check; Complete
+                    </button>
+                    <button class="btn btn-sm btn-ghost text-danger cancel-job-btn" data-job-id="${j.id}" title="Cancel job and purge customer file">
+                      Cancel
+                    </button>
+                  ` : ''}
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+
+    // Filter status tabs
+    content.querySelectorAll('.filter-tab-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        jobsFilterStatus = pill.getAttribute('data-status');
+        renderJobsTab(content, data);
+      });
+    });
+
+    // Search and select filters
+    const sInput = document.getElementById('jobsSearchInput');
+    sInput?.addEventListener('input', (e) => {
+      jobsFilterSearch = e.target.value;
+      renderJobsTab(content, data);
+    });
+
+    document.getElementById('jobsPaymentSelect')?.addEventListener('change', (e) => {
+      jobsFilterPayment = e.target.value;
+      renderJobsTab(content, data);
+    });
+
+    document.getElementById('jobsColorSelect')?.addEventListener('change', (e) => {
+      jobsFilterColor = e.target.value;
+      renderJobsTab(content, data);
+    });
+
+    document.getElementById('jobsDuplexSelect')?.addEventListener('change', (e) => {
+      jobsFilterDuplex = e.target.value;
+      renderJobsTab(content, data);
+    });
+
+    document.getElementById('jobsSortSelect')?.addEventListener('change', (e) => {
+      jobsSortOrder = e.target.value;
+      renderJobsTab(content, data);
+    });
+
+    document.getElementById('refreshJobsBtn')?.addEventListener('click', loadData);
+    document.getElementById('jobsQueueTestBtn')?.addEventListener('click', handleQuickTestPrint);
+
+    // Job Card Action Listeners
+    content.querySelectorAll('.preview-job-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const jId = btn.getAttribute('data-job-id');
+        const job = allJobs.find(j => j.id === jId);
+        if (job) openAdminDocumentPreview(job);
+      });
+    });
+
+    content.querySelectorAll('.send-to-print-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const jId = btn.getAttribute('data-job-id');
+        btn.disabled = true;
+        const res = await manageCafeJob(cafeId, jId, 'send_to_print');
+        if (!res.success) {
+          showNotification(res.error || 'Failed to dispatch to print.', 'error');
+          btn.disabled = false;
+        } else {
+          showNotification(res.message || 'Job dispatched to print queue.', res.device_id ? 'success' : 'warning');
+          await loadData();
+        }
+      });
+    });
+
+    content.querySelectorAll('.badge-toggle-payment').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const jId = btn.getAttribute('data-job-id');
+        const curr = btn.getAttribute('data-current-payment');
+        const next = curr === 'paid' ? 'unpaid' : 'paid';
+        const res = await manageCafeJob(cafeId, jId, 'update_payment', { paymentStatus: next });
+        if (res.success) {
+          showNotification(`Payment marked as ${next.toUpperCase()}`, 'success');
+          loadData();
+        } else {
+          showNotification(res.error || 'Failed to update payment.', 'error');
+        }
+      });
+    });
+
+    content.querySelectorAll('.mark-complete-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Mark job as Completed? The customer uploaded file will be permanently deleted.')) return;
+        const jId = btn.getAttribute('data-job-id');
+        const res = await manageCafeJob(cafeId, jId, 'complete');
+        if (res.success) {
+          showNotification('Job marked completed and customer file purged.', 'success');
+          loadData();
+        } else {
+          showNotification(res.error || 'Failed to complete job.', 'error');
+        }
+      });
+    });
+
+    content.querySelectorAll('.cancel-job-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Cancel this print job? The customer uploaded file will be permanently deleted.')) return;
+        const jId = btn.getAttribute('data-job-id');
+        const res = await manageCafeJob(cafeId, jId, 'cancel');
+        if (res.success) {
+          showNotification('Job cancelled and customer file purged.', 'info');
+          loadData();
+        } else {
+          showNotification(res.error || 'Failed to cancel job.', 'error');
+        }
+      });
+    });
+  }
+
+  // ----------------------------------------------------
+  // TAB 1C: ORDER HISTORY (NON-SENSITIVE RECORDS ONLY)
+  // ----------------------------------------------------
+  function renderHistoryTab(content, data) {
+    const historicalJobs = (data.jobs || []).filter(j => j.status === 'completed' || j.status === 'cancelled');
+
+    content.innerHTML = `
+      <div class="tab-pane-fade">
+        <div class="section-editorial-header">
+          <div>
+            <span class="pill-tag font-mono">BUSINESS AUDIT TRAIL</span>
+            <h2 class="editorial-h2">Order &amp; Print History</h2>
+            <p class="auth-subtext">Historical business records of completed and closed orders. In strict compliance with customer privacy rules, all uploaded documents are permanently purged upon completion.</p>
+          </div>
+          <div class="section-actions">
+            <span class="badge badge-staff font-mono">🔒 CUSTOMER FILES PURGED</span>
+          </div>
+        </div>
+
+        <div class="history-table-container mt-6">
+          ${historicalJobs.length === 0 ? `
+            <div class="empty-state-card text-center py-12">
+              <p class="text-muted font-mono">No completed orders in history yet.</p>
+            </div>
+          ` : `
+            <div class="data-table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Order #</th>
+                    <th>Customer</th>
+                    <th>Status</th>
+                    <th>Date &bull; Time</th>
+                    <th>Pages / Mode</th>
+                    <th>Copies</th>
+                    <th>Total Price</th>
+                    <th>Payment</th>
+                    <th>Privacy State</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${historicalJobs.map(j => `
+                    <tr>
+                      <td class="font-mono font-bold">${escapeHtml(j.order_number || j.job_number)}</td>
+                      <td>${escapeHtml(j.customer_name || 'Guest')}</td>
+                      <td>
+                        <span class="job-status-pill status-${j.status} font-mono text-xs">
+                          ${j.status.toUpperCase()}
+                        </span>
+                      </td>
+                      <td class="font-mono text-xs text-muted">
+                        ${j.completed_at ? new Date(j.completed_at).toLocaleString() : new Date(j.created_at).toLocaleString()}
+                      </td>
+                      <td class="font-mono text-xs">
+                        ${j.pages} pg${j.pages > 1 ? 's' : ''} &bull; ${j.color_mode.toUpperCase()} &bull; ${j.duplex.toUpperCase()}
+                      </td>
+                      <td class="font-mono text-xs">${j.copies}</td>
+                      <td class="font-mono font-bold">₹${Number(j.total_price).toFixed(2)}</td>
+                      <td>
+                        <span class="payment-badge-${j.payment_status || 'unpaid'} font-mono text-xs">
+                          ${(j.payment_status || 'unpaid').toUpperCase()}
+                        </span>
+                      </td>
+                      <td class="font-mono text-xs text-muted">
+                        <span title="Document was permanently deleted after completion">🔒 File Purged</span>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `}
+        </div>
+      </div>
+    `;
+  }
+
+  // ----------------------------------------------------
+  // TAB 1D: EARNINGS DASHBOARD
+  // ----------------------------------------------------
+  function renderEarningsTab(content, data) {
+    const earnings = data.earnings || {};
+    const weekEarn = Number(earnings.week_earnings || 0).toFixed(2);
+    const todayEarn = Number(earnings.today_earnings || 0).toFixed(2);
+    const monthEarn = Number(earnings.month_earnings || 0).toFixed(2);
+    const paidAmount = Number(earnings.paid_amount || 0).toFixed(2);
+    const pendingAmount = Number(earnings.pending_amount || 0).toFixed(2);
+    const bwRev = Number(earnings.bw_revenue || 0).toFixed(2);
+    const colorRev = Number(earnings.color_revenue || 0).toFixed(2);
+    const completedCount = earnings.total_completed_orders || 0;
+
+    content.innerHTML = `
+      <div class="tab-pane-fade">
+        <div class="section-editorial-header">
+          <div>
+            <span class="pill-tag font-mono">FINANCIAL INTELLIGENCE</span>
+            <h2 class="editorial-h2">Earnings &amp; Revenue Analytics</h2>
+            <p class="auth-subtext">Real-time revenue metrics computed directly from authentic completed and paid customer transactions.</p>
+          </div>
+        </div>
+
+        <!-- Prominent Hero Weekly Earnings Card -->
+        <div class="earnings-hero-card mt-6">
+          <div class="earnings-hero-content">
+            <span class="font-mono text-xs tracking-wider uppercase text-muted">CALCULATED WEEKLY REVENUE</span>
+            <div class="earnings-hero-amount font-mono font-bold">
+              ₹${weekEarn}
+            </div>
+            <div class="earnings-hero-badge mt-2">
+              <span class="pill-tag font-mono text-green">THIS WEEK</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4 Metrics Row -->
+        <div class="admin-overview-grid mt-6">
+          <div class="admin-metric-card">
+            <div class="metric-header">
+              <span class="metric-title font-mono">TODAY'S REVENUE</span>
+              <span class="metric-badge font-mono text-accent">TODAY</span>
+            </div>
+            <div class="metric-value font-mono">₹${todayEarn}</div>
+            <div class="metric-desc font-mono text-muted">Cleared revenue today</div>
+          </div>
+
+          <div class="admin-metric-card">
+            <div class="metric-header">
+              <span class="metric-title font-mono">MONTHLY REVENUE</span>
+              <span class="metric-badge font-mono text-accent">THIS MONTH</span>
+            </div>
+            <div class="metric-value font-mono">₹${monthEarn}</div>
+            <div class="metric-desc font-mono text-muted">Calendar month to date</div>
+          </div>
+
+          <div class="admin-metric-card">
+            <div class="metric-header">
+              <span class="metric-title font-mono">COLLECTED / PAID</span>
+              <span class="metric-badge font-mono text-green">&check;</span>
+            </div>
+            <div class="metric-value font-mono">₹${paidAmount}</div>
+            <div class="metric-desc font-mono text-muted">Total collected from paid orders</div>
+          </div>
+
+          <div class="admin-metric-card">
+            <div class="metric-header">
+              <span class="metric-title font-mono">PENDING COUNTER BALANCE</span>
+              <span class="metric-badge font-mono text-warning">UNPAID</span>
+            </div>
+            <div class="metric-value font-mono">₹${pendingAmount}</div>
+            <div class="metric-desc font-mono text-muted">Pending payment upon counter pickup</div>
+          </div>
+        </div>
+
+        <!-- Revenue Breakdown Cards -->
+        <div class="dashboard-two-col mt-6">
+          <div class="col-card">
+            <div class="col-card-header">
+              <h3 class="col-card-title">Revenue by Output Mode</h3>
+            </div>
+            <div class="breakdown-list p-4">
+              <div class="breakdown-row" style="display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border-subtle);">
+                <div>
+                  <strong>Black &amp; White Printing</strong>
+                  <p class="text-xs text-muted font-mono">Standard monochrome documents</p>
+                </div>
+                <div class="font-mono font-bold text-lg">₹${bwRev}</div>
+              </div>
+              <div class="breakdown-row" style="display:flex;justify-content:space-between;padding:12px 0;">
+                <div>
+                  <strong>Colour Printing</strong>
+                  <p class="text-xs text-muted font-mono">Full colour photo &amp; graphic sheets</p>
+                </div>
+                <div class="font-mono font-bold text-lg text-accent">₹${colorRev}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-card">
+            <div class="col-card-header">
+              <h3 class="col-card-title">Order Fulfillment Performance</h3>
+            </div>
+            <div class="breakdown-list p-4">
+              <div class="breakdown-row" style="display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border-subtle);">
+                <div>
+                  <strong>Total Orders Completed</strong>
+                  <p class="text-xs text-muted font-mono">Successfully spooled and handed over</p>
+                </div>
+                <div class="font-mono font-bold text-lg text-green">${completedCount} Orders</div>
+              </div>
+              <div class="breakdown-row" style="display:flex;justify-content:space-between;padding:12px 0;">
+                <div>
+                  <strong>Cancelled / Purged Orders</strong>
+                  <p class="text-xs text-muted font-mono">Zero revenue counted from cancelled orders</p>
+                </div>
+                <div class="font-mono font-bold text-lg text-muted">
+                  ${(data.jobs || []).filter(j => j.status === 'cancelled').length} Orders
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // ----------------------------------------------------
+  // ADMIN DOCUMENT PREVIEW MODAL (CRITICAL FIX)
+  // ----------------------------------------------------
+  async function openAdminDocumentPreview(job) {
+    if (job.status === 'completed' || job.status === 'cancelled' || job.file_url === '[PURGED]') {
+      showNotification('This document was permanently purged for customer privacy after print completion.', 'info');
+      return;
+    }
+
+    if (!job.file_url || job.file_url.startsWith('spool://')) {
+      showNotification('Document is spooled directly on the local counter PC. Cloud preview is unavailable.', 'info');
+      return;
+    }
+
+    showNotification('Generating secure signed preview...', 'info');
+    const signedRes = await fetchJobSignedPreviewUrl(job.file_url);
+
+    if (!signedRes.success || !signedRes.signedUrl) {
+      showNotification('Preview unavailable for this file.', 'warning');
+      return;
+    }
+
+    const modalId = 'adminPreviewModal';
+    let modal = document.getElementById(modalId);
+    if (modal) modal.remove();
+
+    const isPdf = job.file_name.toLowerCase().endsWith('.pdf');
+    let zoomLevel = 100;
+
+    modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'admin-modal-backdrop';
+    modal.style.display = 'flex';
+    modal.innerHTML = `
+      <div class="admin-modal-card preview-modal-card">
+        <div class="modal-header">
+          <div>
+            <span class="pill-tag font-mono">${isPdf ? 'PDF DOCUMENT' : 'IMAGE FILE'}</span>
+            <h2 class="editorial-h2" style="font-size:1.15rem;margin-top:4px;">${escapeHtml(job.file_name)}</h2>
+            <span class="text-xs text-muted font-mono">
+              Order: ${escapeHtml(job.order_number || job.job_number)} &bull; Customer: ${escapeHtml(job.customer_name || 'Guest')} &bull; ${job.pages} page${job.pages > 1 ? 's' : ''} &bull; ${job.copies} copy
+            </span>
+          </div>
+          <button class="btn btn-sm btn-ghost close-admin-preview-btn" aria-label="Close Preview">&times;</button>
+        </div>
+
+        <div class="modal-body preview-modal-body">
+          <div class="preview-zoom-bar">
+            <button class="btn btn-sm btn-ghost" id="adminZoomOutBtn" title="Zoom Out">&minus;</button>
+            <span class="font-mono text-xs" id="adminZoomVal">100%</span>
+            <button class="btn btn-sm btn-ghost" id="adminZoomInBtn" title="Zoom In">&plus;</button>
+            <button class="btn btn-sm btn-ghost" id="adminZoomFitBtn">Fit</button>
+            <a href="${signedRes.signedUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-ghost font-mono text-xs" style="margin-left:auto;">
+              Expand Full Screen &nearr;
+            </a>
+          </div>
+
+          <div class="preview-stage-container" id="adminPreviewStage">
+            ${isPdf ? `
+              <iframe 
+                src="${signedRes.signedUrl}#toolbar=1" 
+                class="pdf-preview-frame" 
+                title="Admin Document Preview"
+                onerror="this.parentElement.innerHTML='<div class=\\'alert-box alert-warning\\'>Preview unavailable for this file.</div>'"
+              ></iframe>
+            ` : `
+              <div class="image-preview-wrapper" id="adminImgWrap">
+                <img src="${signedRes.signedUrl}" alt="Print Job Document" id="adminPreviewImg" />
+              </div>
+            `}
+          </div>
+        </div>
+
+        <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;">
+          <span class="text-xs text-muted font-mono">🔒 Temporary 5-minute signed token &bull; Purged on completion</span>
+          <button class="btn btn-secondary close-admin-preview-btn">Close Preview</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const closeModal = () => modal.remove();
+    modal.querySelectorAll('.close-admin-preview-btn').forEach(b => b.addEventListener('click', closeModal));
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal();
+    });
+
+    // Zoom handlers
+    const updateZoom = (z) => {
+      zoomLevel = Math.max(50, Math.min(250, z));
+      document.getElementById('adminZoomVal').textContent = `${zoomLevel}%`;
+      const stage = document.getElementById('adminPreviewStage');
+      const img = document.getElementById('adminPreviewImg');
+      if (img) {
+        img.style.transform = `scale(${zoomLevel / 100})`;
+        img.style.transformOrigin = 'center top';
+      } else if (stage) {
+        stage.style.zoom = `${zoomLevel}%`;
+      }
+    };
+
+    document.getElementById('adminZoomInBtn')?.addEventListener('click', () => updateZoom(zoomLevel + 25));
+    document.getElementById('adminZoomOutBtn')?.addEventListener('click', () => updateZoom(zoomLevel - 25));
+    document.getElementById('adminZoomFitBtn')?.addEventListener('click', () => updateZoom(100));
   }
 
   // ----------------------------------------------------

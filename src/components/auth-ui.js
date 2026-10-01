@@ -203,11 +203,11 @@ function renderLoginForm(container) {
       setTimeout(() => {
         const role = result.profile?.role;
         if (role === ROLES.SUPER_ADMIN) {
-          window.navigateTo('/admin/audit');
+          window.navigateTo('/admin');
         } else if (role === ROLES.CAFE_ADMIN) {
-          window.navigateTo('/cafe/settings');
+          window.navigateTo('/cafe');
         } else {
-          window.navigateTo('/staff/terminal');
+          window.navigateTo('/staff');
         }
       }, 700);
     }
@@ -855,8 +855,10 @@ async function renderProtectedRoute(routePath, container) {
     return;
   }
 
-  let sectionTitle = 'Workstation';
-  if (routePath.startsWith('/staff')) sectionTitle = 'Staff Counter Terminal';
+  if (routePath.startsWith('/staff')) {
+    await renderCafeAdminDashboard(container, { user, profile, isStaff: true });
+    return;
+  }
 
   container.innerHTML = `
     <div class="auth-page-wrapper">

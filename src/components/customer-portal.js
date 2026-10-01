@@ -203,7 +203,11 @@ function renderPortalMain(container, { cafe, can_print, status_message, pricing,
                       <span class="file-size-text font-mono">${formatFileSize(f.size)} &bull; ${f.pages} pg${f.pages > 1 ? 's' : ''}</span>
                     </div>
                   </div>
-                  <div class="file-item-right">
+                  <div class="file-item-right" style="display:flex;gap:8px;align-items:center;">
+                    <button type="button" class="btn btn-sm btn-secondary preview-doc-btn" data-file-id="${f.id}" title="Preview Document">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;margin-right:4px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                      Preview
+                    </button>
                     <button type="button" class="btn btn-sm btn-ghost text-danger remove-file-btn" data-file-id="${f.id}" title="Remove file">
                       &times;
                     </button>
@@ -610,8 +614,20 @@ function renderPortalMain(container, { cafe, can_print, status_message, pricing,
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const fId = btn.getAttribute('data-file-id');
+        const target = uploadedFiles.find(f => f.id === fId);
+        if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
         uploadedFiles = uploadedFiles.filter(f => f.id !== fId);
         renderView();
+      });
+    });
+
+    // Preview document button handlers (Customer-side document preview)
+    container.querySelectorAll('.preview-doc-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const fId = btn.getAttribute('data-file-id');
+        const fileItem = uploadedFiles.find(f => f.id === fId);
+        if (fileItem) openCustomerPreviewModal(fileItem);
       });
     });
 
@@ -642,7 +658,7 @@ function renderPortalMain(container, { cafe, can_print, status_message, pricing,
     });
   }
 
-  function handleFileSelection(e) {
+  async function handleFileSelection(e) {
     hideAlert();
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
@@ -666,14 +682,22 @@ function renderPortalMain(container, { cafe, can_print, status_message, pricing,
         continue;
       }
 
-      // Safe preview thumbnail URL for images
-      let previewUrl = null;
-      if (file.type.startsWith('image/')) {
-        previewUrl = URL.createObjectURL(file);
-      }
+      // Safe local preview blob URL (zero server roundtrip)
+      const previewUrl = URL.createObjectURL(file);
+      let detectedPages = 1;
 
-      // Assume 1 page for image, or estimate for PDF (default 1)
-      const estimatedPages = 1;
+      if (ext === 'pdf') {
+        try {
+          const buf = await file.arrayBuffer();
+          const text = new TextDecoder('latin1').decode(buf);
+          const pageMatches = text.match(/\/Type\s*\/Page\b/g);
+          if (pageMatches && pageMatches.length > 0) {
+            detectedPages = Math.min(1000, Math.max(1, pageMatches.length));
+          }
+        } catch (err) {
+          detectedPages = 1;
+        }
+      }
 
       uploadedFiles.push({
         id: `file_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -682,7 +706,7 @@ function renderPortalMain(container, { cafe, can_print, status_message, pricing,
         size: file.size,
         type: file.type || (ext === 'pdf' ? 'application/pdf' : 'image/jpeg'),
         previewUrl,
-        pages: estimatedPages
+        pages: detectedPages
       });
     }
 
@@ -692,6 +716,97 @@ function renderPortalMain(container, { cafe, can_print, status_message, pricing,
     if (!errorOccurred) {
       renderView();
     }
+  }
+
+  function openCustomerPreviewModal(fileItem) {
+    const modalId = 'customerPreviewModal';
+    let modal = document.getElementById(modalId);
+    if (modal) modal.remove();
+
+    const isPdf = fileItem.type.includes('pdf') || fileItem.name.toLowerCase().endsWith('.pdf');
+    let zoomLevel = 100;
+
+    modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'admin-modal-backdrop';
+    modal.style.display = 'flex';
+    modal.innerHTML = `
+      <div class="admin-modal-card preview-modal-card">
+        <div class="modal-header">
+          <div>
+            <span class="pill-tag font-mono">${isPdf ? 'PDF DOCUMENT' : 'IMAGE'}</span>
+            <h2 class="editorial-h2" style="font-size:1.15rem;margin-top:4px;">${escapeHtml(fileItem.name)}</h2>
+            <span class="text-xs text-muted font-mono">${formatFileSize(fileItem.size)} &bull; ${fileItem.pages} page${fileItem.pages > 1 ? 's' : ''}</span>
+          </div>
+          <button class="btn btn-sm btn-ghost close-preview-modal-btn" aria-label="Close Preview">&times;</button>
+        </div>
+
+        <div class="modal-body preview-modal-body">
+          <div class="preview-zoom-bar">
+            <button class="btn btn-sm btn-ghost" id="custZoomOutBtn" title="Zoom Out">&minus;</button>
+            <span class="font-mono text-xs" id="custZoomVal">100%</span>
+            <button class="btn btn-sm btn-ghost" id="custZoomInBtn" title="Zoom In">&plus;</button>
+            <button class="btn btn-sm btn-ghost" id="custZoomFitBtn">Fit</button>
+          </div>
+
+          <div class="preview-stage-container" id="custPreviewStage">
+            ${isPdf ? `
+              <iframe 
+                src="${fileItem.previewUrl}#toolbar=1" 
+                class="pdf-preview-frame" 
+                title="Customer Document Preview"
+                onerror="this.parentElement.innerHTML='<div class=\\'alert-box alert-warning\\'>Preview unavailable for this file.</div>'"
+              ></iframe>
+            ` : `
+              <div class="image-preview-wrapper" id="custImgWrap">
+                <img src="${fileItem.previewUrl}" alt="Customer Document" id="custPreviewImg" />
+              </div>
+            `}
+          </div>
+        </div>
+
+        <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;">
+          <span class="text-xs text-muted font-mono">🔒 Local preview only &bull; Zero server exposure</span>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-secondary close-preview-modal-btn">Close</button>
+            <button class="btn btn-primary" id="custConfirmDocBtn">
+              &check; Confirm: This is the correct document
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const closeModal = () => modal.remove();
+    modal.querySelectorAll('.close-preview-modal-btn').forEach(b => b.addEventListener('click', closeModal));
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal();
+    });
+
+    document.getElementById('custConfirmDocBtn')?.addEventListener('click', () => {
+      closeModal();
+      showAlert('Document confirmed! Ready for print settings.');
+    });
+
+    // Zoom handlers
+    const updateZoom = (z) => {
+      zoomLevel = Math.max(50, Math.min(250, z));
+      document.getElementById('custZoomVal').textContent = `${zoomLevel}%`;
+      const stage = document.getElementById('custPreviewStage');
+      const img = document.getElementById('custPreviewImg');
+      if (img) {
+        img.style.transform = `scale(${zoomLevel / 100})`;
+        img.style.transformOrigin = 'center top';
+      } else if (stage) {
+        stage.style.zoom = `${zoomLevel}%`;
+      }
+    };
+
+    document.getElementById('custZoomInBtn')?.addEventListener('click', () => updateZoom(zoomLevel + 25));
+    document.getElementById('custZoomOutBtn')?.addEventListener('click', () => updateZoom(zoomLevel - 25));
+    document.getElementById('custZoomFitBtn')?.addEventListener('click', () => updateZoom(100));
   }
 
   async function handleFinalSubmit() {
