@@ -15,7 +15,9 @@ import {
   revokeDevice,
   createTestPrintJob,
   manageCafeJob,
-  fetchJobSignedPreviewUrl
+  fetchJobSignedPreviewUrl,
+  updateJobPrintLayout,
+  uploadCustomerPrintDocument
 } from '../lib/cafeadmin.js';
 import { supabase } from '../lib/supabase.js';
 import { signOut } from '../lib/auth.js';
@@ -591,6 +593,7 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
             const devObj = devices.find(d => d.id === j.device_id);
             const devLabel = devObj ? (devObj.device_label || 'Counter PC') : (j.device_id ? 'Print PC' : 'Unassigned');
             const isCompletedOrPurged = j.status === 'completed' || j.status === 'cancelled' || j.file_url === '[PURGED]';
+            const isIdEligible = isIdCardEligibleJob(j);
 
             return `
               <div class="job-card-editorial status-border-${j.status}" data-job-id="${j.id}">
@@ -600,6 +603,7 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
                     <span class="job-id-sub font-mono text-muted text-xs">Internal ID: ${escapeHtml(j.job_number)}</span>
                   </div>
                   <div class="job-card-badges">
+                    ${isIdEligible ? `<span class="badge font-mono" style="background:rgba(37,99,235,0.12);color:#2563eb;padding:3px 8px;border-radius:12px;font-size:0.7rem;font-weight:700;">🪪 ID CARD</span>` : ''}
                     <button 
                       type="button" 
                       class="badge-toggle-payment payment-badge-${j.payment_status || 'unpaid'} font-mono" 
@@ -676,6 +680,15 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
                       🔒 File Purged
                     </span>
                   `}
+
+                  ${isIdEligible && !isCompletedOrPurged ? `
+                    <button class="btn btn-sm btn-secondary open-f4-editor-btn" data-job-id="${j.id}" title="Edit Document & ID Card Layout in F4/A4 Editor">
+                      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" style="width:13px;height:13px;margin-right:4px;">
+                        <path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                      </svg>
+                      Edit Layout (F4/A4)
+                    </button>
+                  ` : ''}
 
                   ${j.status === 'failed' ? `
                     <button class="btn btn-sm btn-primary retry-job-btn" data-job-id="${j.id}" title="Reset and re-queue failed job">
@@ -791,6 +804,14 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
       });
     });
 
+    content.querySelectorAll('.open-f4-editor-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const jId = btn.getAttribute('data-job-id');
+        const job = allJobs.find(j => j.id === jId);
+        if (job) openCafeAdminF4Editor(job);
+      });
+    });
+
     content.querySelectorAll('.send-to-print-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const jId = btn.getAttribute('data-job-id');
@@ -883,6 +904,827 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
           showNotification(res.error || 'Failed to cancel job.', 'error');
         }
       });
+    });
+  }
+
+  // ----------------------------------------------------
+  // F4 & A4 DOCUMENT & ID CARD LAYOUT EDITOR (STAFF/ADMIN)
+  // ----------------------------------------------------
+  function isIdCardEligibleJob(job) {
+    if (!job) return false;
+    const isImageFile = (name) => /\.(jpe?g|png|webp|bmp)$/i.test(name || '');
+    const idKeywords = /(aadhaar|aadhar|pan|voter|license|licence|identity|id[_\s-]?card|front|back|govt?|document)/i;
+
+    if (idKeywords.test(job.file_name || '')) return true;
+
+    if (Array.isArray(job.files_metadata) && job.files_metadata.length > 0) {
+      const imgFiles = job.files_metadata.filter(f => (f.type && f.type.startsWith('image/')) || isImageFile(f.name));
+      if (imgFiles.length >= 2) return true;
+      for (const f of job.files_metadata) {
+        if (idKeywords.test(f.name || '')) return true;
+      }
+    }
+
+    if (isImageFile(job.file_name)) return true;
+    return false;
+  }
+
+  async function openCafeAdminF4Editor(job) {
+    if (job.status === 'completed' || job.status === 'cancelled' || job.file_url === '[PURGED]') {
+      showNotification('This document has been purged after print completion.', 'info');
+      return;
+    }
+
+    showNotification('Preparing F4 / A4 Document Editor...', 'info');
+
+    // 1. Gather all printable image sources
+    const rawFiles = [];
+    if (Array.isArray(job.files_metadata) && job.files_metadata.length > 0) {
+      job.files_metadata.forEach((f, idx) => {
+        const isImg = (f.type && f.type.startsWith('image/')) || /\.(jpe?g|png|webp|bmp)$/i.test(f.name || '');
+        if (isImg && f.storage_path) {
+          rawFiles.push({ name: f.name || `Image_${idx + 1}`, storagePath: f.storage_path });
+        }
+      });
+    }
+
+    // If no files from metadata, check primary file_url
+    if (rawFiles.length === 0 && job.file_url && !job.file_url.startsWith('spool://') && job.file_url !== '[PURGED]') {
+      rawFiles.push({ name: job.file_name || 'Document_Image.jpg', storagePath: job.file_url });
+    }
+
+    if (rawFiles.length === 0) {
+      showNotification('No image files available for layout editing in this order.', 'warning');
+      return;
+    }
+
+    // 2. Fetch signed URLs for each image
+    const loadedImages = [];
+    for (const rf of rawFiles) {
+      const sRes = await fetchJobSignedPreviewUrl(rf.storagePath);
+      if (sRes.success && sRes.signedUrl) {
+        loadedImages.push({
+          name: rf.name,
+          url: sRes.signedUrl
+        });
+      }
+    }
+
+    if (loadedImages.length === 0) {
+      showNotification('Could not load document images for editing.', 'error');
+      return;
+    }
+
+    // 3. Build Modal DOM
+    const modalId = 'cafeAdminF4EditorModal';
+    let existingModal = document.getElementById(modalId);
+    if (existingModal) existingModal.remove();
+
+    const modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'admin-modal-backdrop';
+    modal.style.display = 'flex';
+
+    // State
+    let currentPaper = 'f4'; // default to F4
+    let currentOrientation = 'portrait';
+    let elements = [];
+    let selectedElementId = null;
+    let undoStack = [];
+    let redoStack = [];
+
+    const PAPER_DIMENSIONS = {
+      a4: {
+        portrait: { width: 380, height: 537, dpiW: 2480, dpiH: 3508, label: 'A4: 210 × 297 mm' },
+        landscape: { width: 537, height: 380, dpiW: 3508, dpiH: 2480, label: 'A4: 297 × 210 mm' }
+      },
+      f4: {
+        portrait: { width: 380, height: 583, dpiW: 2540, dpiH: 3898, label: 'F4: 215 × 330 mm (Foolscap / Legal)' },
+        landscape: { width: 583, height: 380, dpiW: 3898, dpiH: 2540, label: 'F4: 330 × 215 mm (Foolscap / Legal)' }
+      }
+    };
+
+    function saveState() {
+      undoStack.push(JSON.stringify(elements));
+      if (undoStack.length > 25) undoStack.shift();
+      redoStack = [];
+    }
+
+    modal.innerHTML = `
+      <div class="admin-modal-card a4-editor-modal-card">
+        <div class="a4-editor-header">
+          <div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <span class="pill-tag font-mono">COUNTER WORKSPACE</span>
+              <span class="badge font-mono text-xs" style="background:#2563eb;color:#fff;padding:2px 8px;border-radius:12px;font-weight:700;">ADMIN F4 EDITOR</span>
+            </div>
+            <h2 class="editorial-h2" style="font-size:1.25rem;margin-top:2px;">F4 Document &amp; ID Card Layout Editor</h2>
+            <p class="text-xs text-muted">
+              Order #${escapeHtml(job.order_number || job.job_number)} &bull; ${escapeHtml(job.customer_name || 'Customer')} &bull; Arrange &amp; verify ID card layout before printing.
+            </p>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button class="btn btn-sm btn-ghost close-f4-editor-btn" aria-label="Close Editor">&times;</button>
+          </div>
+        </div>
+
+        <!-- Presets and Controls Bar -->
+        <div class="a4-editor-tools-bar">
+          <!-- Paper Size Toggle -->
+          <div style="display:flex;gap:6px;align-items:center;">
+            <span class="a4-control-label">Paper:</span>
+            <button type="button" class="btn btn-xs ${currentPaper === 'f4' ? 'btn-primary' : 'btn-secondary'}" id="paperF4Btn" title="F4 (Foolscap / Legal 215×330mm)">F4 Legal</button>
+            <button type="button" class="btn btn-xs ${currentPaper === 'a4' ? 'btn-primary' : 'btn-secondary'}" id="paperA4Btn" title="A4 (210×297mm)">A4 Standard</button>
+          </div>
+
+          <div style="height:18px;width:1px;background:var(--border-subtle);margin:0 4px;"></div>
+
+          <!-- Orientation Toggle -->
+          <div style="display:flex;gap:6px;align-items:center;">
+            <span class="a4-control-label">Orientation:</span>
+            <button type="button" class="btn btn-xs ${currentOrientation === 'portrait' ? 'btn-primary' : 'btn-secondary'}" id="f4OrientPortraitBtn">Portrait</button>
+            <button type="button" class="btn btn-xs ${currentOrientation === 'landscape' ? 'btn-primary' : 'btn-secondary'}" id="f4OrientLandscapeBtn">Landscape</button>
+          </div>
+
+          <div style="height:18px;width:1px;background:var(--border-subtle);margin:0 4px;"></div>
+
+          <!-- Quick Presets -->
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <span class="a4-control-label">Presets:</span>
+            <button type="button" class="btn btn-xs btn-secondary" id="f4PresetSideBySideBtn" title="Arrange front and back side-by-side (Aadhaar / PAN)">
+              🪪 Side-by-Side (Aadhaar/PAN)
+            </button>
+            <button type="button" class="btn btn-xs btn-secondary" id="f4PresetStackedBtn" title="Arrange front and back vertically top & bottom">
+              📄 Stacked Top/Bottom
+            </button>
+            <button type="button" class="btn btn-xs btn-secondary" id="f4PresetFitBtn" title="Fit selected element to sheet">
+              🔲 Fit to Page
+            </button>
+            <button type="button" class="btn btn-xs btn-ghost text-muted" id="f4PresetResetBtn" title="Reset layout">
+              ↺ Reset
+            </button>
+            <button type="button" class="btn btn-xs btn-ghost text-muted" id="f4UndoBtn" title="Undo change">
+              ↩ Undo
+            </button>
+            <button type="button" class="btn btn-xs btn-ghost text-muted" id="f4RedoBtn" title="Redo change">
+              ↪ Redo
+            </button>
+          </div>
+        </div>
+
+        <!-- Canvas Workspace -->
+        <div class="a4-editor-workspace">
+          <!-- Canvas Viewport -->
+          <div class="a4-canvas-viewport" id="f4CanvasViewport">
+            <div class="a4-paper-sheet ${currentPaper}-${currentOrientation}" id="f4PaperSheet">
+              <div class="a4-margin-guide"></div>
+              <!-- Placed Elements -->
+            </div>
+            <div class="a4-sheet-meta font-mono" style="position:absolute;bottom:10px;left:24px;font-size:0.75rem;color:#a1a1aa;">
+              <span id="f4DimensionsLabel">F4: 215 × 330 mm (Portrait)</span>
+              <span> &bull; Click to select &bull; Drag to move</span>
+            </div>
+          </div>
+
+          <!-- Controls Sidebar -->
+          <div class="a4-editor-sidebar">
+            <div class="a4-sidebar-section">
+              <h4 class="a4-sidebar-title">Documents / ID Photos (${loadedImages.length})</h4>
+              <div class="a4-elements-list" id="f4ElementsList"></div>
+              <div style="margin-top:10px;">
+                <label class="btn btn-xs btn-secondary w-full" style="text-align:center;cursor:pointer;display:block;">
+                  + Add Extra Image
+                  <input type="file" id="f4AddExtraFileInput" accept="image/jpeg,image/png,image/webp" style="display:none;" />
+                </label>
+              </div>
+            </div>
+
+            <!-- Selected Element Adjustments -->
+            <div class="a4-sidebar-section" id="f4SelectedControls" style="display:none;">
+              <h4 class="a4-sidebar-title">Selected ID Adjustments</h4>
+
+              <div class="a4-control-group">
+                <label class="a4-control-label">Scale: <span id="f4ScaleLabel" class="font-mono text-accent">100%</span></label>
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <button type="button" class="btn btn-xs btn-ghost" id="f4ScaleMinus">-</button>
+                  <input type="range" id="f4ScaleSlider" min="20" max="300" value="100" class="a4-slider" />
+                  <button type="button" class="btn btn-xs btn-ghost" id="f4ScalePlus">+</button>
+                </div>
+              </div>
+
+              <div class="a4-control-group">
+                <label class="a4-control-label">Rotation</label>
+                <div style="display:flex;gap:6px;">
+                  <button type="button" class="btn btn-xs btn-secondary flex-1" id="f4RotateCCW">↺ 90° CCW</button>
+                  <button type="button" class="btn btn-xs btn-secondary flex-1" id="f4RotateCW">↻ 90° CW</button>
+                </div>
+              </div>
+
+              <div class="a4-control-group">
+                <label class="a4-control-label">Position Alignment</label>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+                  <button type="button" class="btn btn-xs btn-secondary" id="f4AlignTop">Align Top</button>
+                  <button type="button" class="btn btn-xs btn-secondary" id="f4AlignBottom">Align Bottom</button>
+                  <button type="button" class="btn btn-xs btn-secondary" id="f4AlignCenter">Center Page</button>
+                  <button type="button" class="btn btn-xs btn-secondary" id="f4AlignReset">Reset Pos</button>
+                </div>
+              </div>
+
+              <div class="a4-control-group" style="padding-top:8px;border-top:1px dashed var(--border-subtle);">
+                <button type="button" class="btn btn-xs btn-danger w-full" id="f4RemoveElementBtn">🗑 Remove from Canvas</button>
+              </div>
+            </div>
+
+            <div class="a4-sidebar-section text-xs text-muted" style="margin-top:auto;">
+              <p>🖨 <strong>Counter Print Dispatch:</strong> Layout renders at 300 DPI high-resolution for physical counter printing.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer Actions -->
+        <div class="a4-editor-footer" style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;border-top:1px solid var(--border-subtle);margin-top:12px;">
+          <button type="button" class="btn btn-secondary close-f4-editor-btn">Cancel</button>
+          <button type="button" class="btn btn-primary" id="f4SaveAndApplyBtn" style="background:#2563eb;border-color:#2563eb;font-weight:700;">
+            ✔ Finalize &amp; Save Print Layout
+          </button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Initialize elements from loadedImages
+    loadedImages.forEach((imgItem, idx) => {
+      elements.push({
+        id: 'elem_' + Math.random().toString(36).substring(2, 9),
+        name: imgItem.name,
+        url: imgItem.url,
+        x: 40,
+        y: 40 + (idx * 160),
+        width: 220,
+        height: 140,
+        rotation: 0,
+        scale: 100,
+        aspectRatio: 1.58
+      });
+    });
+
+    if (elements.length > 0) {
+      selectedElementId = elements[0].id;
+    }
+
+    // Auto-detect natural image ratios
+    elements.forEach(elem => {
+      const img = new Image();
+      img.onload = () => {
+        if (img.naturalWidth && img.naturalHeight) {
+          elem.aspectRatio = img.naturalWidth / img.naturalHeight;
+          elem.width = Math.min(260, Math.round(150 * elem.aspectRatio));
+          elem.height = Math.round(elem.width / elem.aspectRatio);
+          renderCanvasElements();
+        }
+      };
+      img.src = elem.url;
+    });
+
+    // Helper: close
+    function closeEditor() {
+      modal.remove();
+    }
+    modal.querySelectorAll('.close-f4-editor-btn').forEach(btn => btn.addEventListener('click', closeEditor));
+
+    // Update dimensions / class
+    function updateSheetSize() {
+      const sheet = document.getElementById('f4PaperSheet');
+      const label = document.getElementById('f4DimensionsLabel');
+      const curConfig = PAPER_DIMENSIONS[currentPaper][currentOrientation];
+
+      if (sheet) {
+        sheet.className = `a4-paper-sheet ${currentPaper}-${currentOrientation}`;
+      }
+      if (label) {
+        label.textContent = `${curConfig.label} (${currentOrientation.toUpperCase()})`;
+      }
+
+      // Update toggle buttons
+      const f4Btn = document.getElementById('paperF4Btn');
+      const a4Btn = document.getElementById('paperA4Btn');
+      if (f4Btn && a4Btn) {
+        f4Btn.className = `btn btn-xs ${currentPaper === 'f4' ? 'btn-primary' : 'btn-secondary'}`;
+        a4Btn.className = `btn btn-xs ${currentPaper === 'a4' ? 'btn-primary' : 'btn-secondary'}`;
+      }
+
+      const portBtn = document.getElementById('f4OrientPortraitBtn');
+      const landBtn = document.getElementById('f4OrientLandscapeBtn');
+      if (portBtn && landBtn) {
+        portBtn.className = `btn btn-xs ${currentOrientation === 'portrait' ? 'btn-primary' : 'btn-secondary'}`;
+        landBtn.className = `btn btn-xs ${currentOrientation === 'landscape' ? 'btn-primary' : 'btn-secondary'}`;
+      }
+
+      renderCanvasElements();
+    }
+
+    // Paper buttons
+    document.getElementById('paperF4Btn')?.addEventListener('click', () => {
+      saveState();
+      currentPaper = 'f4';
+      updateSheetSize();
+    });
+
+    document.getElementById('paperA4Btn')?.addEventListener('click', () => {
+      saveState();
+      currentPaper = 'a4';
+      updateSheetSize();
+    });
+
+    // Orientation buttons
+    document.getElementById('f4OrientPortraitBtn')?.addEventListener('click', () => {
+      saveState();
+      currentOrientation = 'portrait';
+      updateSheetSize();
+    });
+
+    document.getElementById('f4OrientLandscapeBtn')?.addEventListener('click', () => {
+      saveState();
+      currentOrientation = 'landscape';
+      updateSheetSize();
+    });
+
+    // Presets: Side-by-Side (Aadhaar / PAN)
+    document.getElementById('f4PresetSideBySideBtn')?.addEventListener('click', () => {
+      saveState();
+      currentOrientation = 'portrait';
+      updateSheetSize();
+      if (elements.length >= 2) {
+        const cardW = 150;
+        const cardH = Math.round(cardW / 1.58);
+        elements[0].x = 28;
+        elements[0].y = 80;
+        elements[0].width = cardW;
+        elements[0].height = cardH;
+        elements[0].rotation = 0;
+        elements[0].scale = 100;
+
+        elements[1].x = 196;
+        elements[1].y = 80;
+        elements[1].width = cardW;
+        elements[1].height = cardH;
+        elements[1].rotation = 0;
+        elements[1].scale = 100;
+      } else if (elements.length === 1) {
+        elements[0].x = 110;
+        elements[0].y = 80;
+        elements[0].rotation = 0;
+        elements[0].scale = 100;
+      }
+      renderCanvasElements();
+      renderSidebarList();
+    });
+
+    // Presets: Stacked Top/Bottom
+    document.getElementById('f4PresetStackedBtn')?.addEventListener('click', () => {
+      saveState();
+      currentOrientation = 'portrait';
+      updateSheetSize();
+      const sheetW = PAPER_DIMENSIONS[currentPaper][currentOrientation].width;
+      const cardW = 240;
+      elements.forEach((elem, idx) => {
+        elem.width = cardW;
+        elem.height = Math.round(cardW / (elem.aspectRatio || 1.58));
+        elem.x = Math.round((sheetW - cardW) / 2);
+        elem.y = 50 + (idx * (elem.height + 30));
+        elem.rotation = 0;
+        elem.scale = 100;
+      });
+      renderCanvasElements();
+      renderSidebarList();
+    });
+
+    // Presets: Fit to Page
+    document.getElementById('f4PresetFitBtn')?.addEventListener('click', () => {
+      const selected = elements.find(e => e.id === selectedElementId) || elements[0];
+      if (!selected) return;
+      saveState();
+      const sheet = PAPER_DIMENSIONS[currentPaper][currentOrientation];
+      const margin = 24;
+      const availW = sheet.width - (margin * 2);
+      const availH = sheet.height - (margin * 2);
+      const ratio = selected.aspectRatio || 1.414;
+
+      if (availW / availH > ratio) {
+        selected.height = availH;
+        selected.width = Math.round(availH * ratio);
+      } else {
+        selected.width = availW;
+        selected.height = Math.round(availW / ratio);
+      }
+      selected.x = Math.round((sheet.width - selected.width) / 2);
+      selected.y = Math.round((sheet.height - selected.height) / 2);
+      selected.rotation = 0;
+      selected.scale = 100;
+      renderCanvasElements();
+      updateSelectedUI();
+    });
+
+    // Presets: Reset
+    document.getElementById('f4PresetResetBtn')?.addEventListener('click', () => {
+      saveState();
+      elements.forEach((elem, idx) => {
+        elem.x = 40;
+        elem.y = 40 + (idx * 160);
+        elem.width = 220;
+        elem.height = Math.round(220 / (elem.aspectRatio || 1.58));
+        elem.rotation = 0;
+        elem.scale = 100;
+      });
+      renderCanvasElements();
+      updateSelectedUI();
+    });
+
+    // Undo / Redo
+    document.getElementById('f4UndoBtn')?.addEventListener('click', () => {
+      if (undoStack.length === 0) return;
+      redoStack.push(JSON.stringify(elements));
+      const prev = undoStack.pop();
+      elements = JSON.parse(prev);
+      renderCanvasElements();
+      renderSidebarList();
+      updateSelectedUI();
+    });
+
+    document.getElementById('f4RedoBtn')?.addEventListener('click', () => {
+      if (redoStack.length === 0) return;
+      undoStack.push(JSON.stringify(elements));
+      const next = redoStack.pop();
+      elements = JSON.parse(next);
+      renderCanvasElements();
+      renderSidebarList();
+      updateSelectedUI();
+    });
+
+    // Render Canvas Elements
+    function renderCanvasElements() {
+      const sheet = document.getElementById('f4PaperSheet');
+      if (!sheet) return;
+
+      // Keep guide
+      sheet.innerHTML = '<div class="a4-margin-guide"></div>';
+
+      elements.forEach(elem => {
+        const item = document.createElement('div');
+        item.className = `a4-canvas-element ${elem.id === selectedElementId ? 'selected' : ''}`;
+        item.setAttribute('data-id', elem.id);
+
+        const scaledW = Math.round(elem.width * (elem.scale / 100));
+        const scaledH = Math.round(elem.height * (elem.scale / 100));
+
+        item.style.left = `${elem.x}px`;
+        item.style.top = `${elem.y}px`;
+        item.style.width = `${scaledW}px`;
+        item.style.height = `${scaledH}px`;
+        item.style.transform = `rotate(${elem.rotation}deg)`;
+
+        item.innerHTML = `
+          <img src="${escapeHtml(elem.url)}" alt="${escapeHtml(elem.name)}" draggable="false" style="width:100%;height:100%;object-fit:fill;" />
+          <div class="a4-element-drag-handle" title="Drag to reposition">✥</div>
+          <div class="a4-element-label font-mono">${escapeHtml(elem.name)}</div>
+        `;
+
+        item.addEventListener('mousedown', (e) => {
+          selectedElementId = elem.id;
+          renderCanvasElements();
+          renderSidebarList();
+          updateSelectedUI();
+          initDrag(e, elem, item);
+        });
+
+        sheet.appendChild(item);
+      });
+    }
+
+    // Drag move
+    function initDrag(e, elem, domItem) {
+      if (e.button !== 0) return;
+      e.preventDefault();
+
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const origX = elem.x;
+      const origY = elem.y;
+      const sheet = PAPER_DIMENSIONS[currentPaper][currentOrientation];
+
+      saveState();
+
+      function onMove(moveEvt) {
+        const dx = moveEvt.clientX - startX;
+        const dy = moveEvt.clientY - startY;
+        elem.x = Math.max(0, Math.min(origX + dx, sheet.width - 30));
+        elem.y = Math.max(0, Math.min(origY + dy, sheet.height - 30));
+        domItem.style.left = `${elem.x}px`;
+        domItem.style.top = `${elem.y}px`;
+      }
+
+      function onUp() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      }
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    }
+
+    // Sidebar list
+    function renderSidebarList() {
+      const list = document.getElementById('f4ElementsList');
+      if (!list) return;
+
+      if (elements.length === 0) {
+        list.innerHTML = `<p class="text-xs text-muted" style="padding:10px 0;">No images placed on canvas.</p>`;
+        return;
+      }
+
+      list.innerHTML = elements.map((elem, idx) => `
+        <div class="a4-element-row ${elem.id === selectedElementId ? 'active' : ''}" data-elem-id="${elem.id}">
+          <div style="width:36px;height:24px;overflow:hidden;border-radius:3px;border:1px solid var(--border-subtle);flex-shrink:0;">
+            <img src="${escapeHtml(elem.url)}" style="width:100%;height:100%;object-fit:cover;" />
+          </div>
+          <div style="flex:1;min-width:0;">
+            <div class="font-mono text-xs truncate">${escapeHtml(elem.name)}</div>
+            <div class="text-xs text-muted">ID Item #${idx + 1}</div>
+          </div>
+          <button type="button" class="btn btn-xs btn-ghost text-muted remove-single-f4-elem" data-id="${elem.id}" title="Remove">&times;</button>
+        </div>
+      `).join('');
+
+      list.querySelectorAll('.a4-element-row').forEach(row => {
+        row.addEventListener('click', (e) => {
+          if (e.target.classList.contains('remove-single-f4-elem')) return;
+          selectedElementId = row.getAttribute('data-elem-id');
+          renderCanvasElements();
+          renderSidebarList();
+          updateSelectedUI();
+        });
+      });
+
+      list.querySelectorAll('.remove-single-f4-elem').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          saveState();
+          const targetId = btn.getAttribute('data-id');
+          elements = elements.filter(el => el.id !== targetId);
+          if (selectedElementId === targetId) {
+            selectedElementId = elements.length > 0 ? elements[0].id : null;
+          }
+          renderCanvasElements();
+          renderSidebarList();
+          updateSelectedUI();
+        });
+      });
+    }
+
+    // Selected element controls UI
+    function updateSelectedUI() {
+      const section = document.getElementById('f4SelectedControls');
+      const selected = elements.find(el => el.id === selectedElementId);
+
+      if (!selected || !section) {
+        if (section) section.style.display = 'none';
+        return;
+      }
+
+      section.style.display = 'block';
+      const slider = document.getElementById('f4ScaleSlider');
+      const scaleLabel = document.getElementById('f4ScaleLabel');
+      if (slider) slider.value = selected.scale || 100;
+      if (scaleLabel) scaleLabel.textContent = `${selected.scale || 100}%`;
+    }
+
+    // Scale controls
+    document.getElementById('f4ScaleSlider')?.addEventListener('input', (e) => {
+      const selected = elements.find(el => el.id === selectedElementId);
+      if (selected) {
+        selected.scale = parseInt(e.target.value, 10);
+        document.getElementById('f4ScaleLabel').textContent = `${selected.scale}%`;
+        renderCanvasElements();
+      }
+    });
+
+    document.getElementById('f4ScaleMinus')?.addEventListener('click', () => {
+      const selected = elements.find(el => el.id === selectedElementId);
+      if (selected && selected.scale > 20) {
+        saveState();
+        selected.scale -= 10;
+        updateSelectedUI();
+        renderCanvasElements();
+      }
+    });
+
+    document.getElementById('f4ScalePlus')?.addEventListener('click', () => {
+      const selected = elements.find(el => el.id === selectedElementId);
+      if (selected && selected.scale < 300) {
+        saveState();
+        selected.scale += 10;
+        updateSelectedUI();
+        renderCanvasElements();
+      }
+    });
+
+    // Rotation controls
+    document.getElementById('f4RotateCCW')?.addEventListener('click', () => {
+      const selected = elements.find(el => el.id === selectedElementId);
+      if (selected) {
+        saveState();
+        selected.rotation = (selected.rotation - 90) % 360;
+        renderCanvasElements();
+      }
+    });
+
+    document.getElementById('f4RotateCW')?.addEventListener('click', () => {
+      const selected = elements.find(el => el.id === selectedElementId);
+      if (selected) {
+        saveState();
+        selected.rotation = (selected.rotation + 90) % 360;
+        renderCanvasElements();
+      }
+    });
+
+    // Alignment
+    document.getElementById('f4AlignTop')?.addEventListener('click', () => {
+      const selected = elements.find(el => el.id === selectedElementId);
+      if (selected) {
+        saveState();
+        selected.y = 20;
+        renderCanvasElements();
+      }
+    });
+
+    document.getElementById('f4AlignBottom')?.addEventListener('click', () => {
+      const selected = elements.find(el => el.id === selectedElementId);
+      if (selected) {
+        saveState();
+        const scaledH = Math.round(selected.height * (selected.scale / 100));
+        selected.y = PAPER_DIMENSIONS[currentPaper][currentOrientation].height - scaledH - 20;
+        renderCanvasElements();
+      }
+    });
+
+    document.getElementById('f4AlignCenter')?.addEventListener('click', () => {
+      const selected = elements.find(el => el.id === selectedElementId);
+      if (selected) {
+        saveState();
+        const sheet = PAPER_DIMENSIONS[currentPaper][currentOrientation];
+        const scaledW = Math.round(selected.width * (selected.scale / 100));
+        const scaledH = Math.round(selected.height * (selected.scale / 100));
+        selected.x = Math.round((sheet.width - scaledW) / 2);
+        selected.y = Math.round((sheet.height - scaledH) / 2);
+        renderCanvasElements();
+      }
+    });
+
+    document.getElementById('f4AlignReset')?.addEventListener('click', () => {
+      const selected = elements.find(el => el.id === selectedElementId);
+      if (selected) {
+        saveState();
+        selected.x = 40;
+        selected.y = 40;
+        selected.scale = 100;
+        selected.rotation = 0;
+        renderCanvasElements();
+        updateSelectedUI();
+      }
+    });
+
+    document.getElementById('f4RemoveElementBtn')?.addEventListener('click', () => {
+      if (!selectedElementId) return;
+      saveState();
+      elements = elements.filter(el => el.id !== selectedElementId);
+      selectedElementId = elements.length > 0 ? elements[0].id : null;
+      renderCanvasElements();
+      renderSidebarList();
+      updateSelectedUI();
+    });
+
+    // Add extra image
+    document.getElementById('f4AddExtraFileInput')?.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const objUrl = URL.createObjectURL(file);
+      const newElem = {
+        id: 'elem_' + Math.random().toString(36).substring(2, 9),
+        name: file.name,
+        url: objUrl,
+        x: 50,
+        y: 50,
+        width: 200,
+        height: 130,
+        rotation: 0,
+        scale: 100,
+        aspectRatio: 1.58
+      };
+
+      const testImg = new Image();
+      testImg.onload = () => {
+        if (testImg.naturalWidth && testImg.naturalHeight) {
+          newElem.aspectRatio = testImg.naturalWidth / testImg.naturalHeight;
+          newElem.width = Math.min(260, Math.round(140 * newElem.aspectRatio));
+          newElem.height = Math.round(newElem.width / newElem.aspectRatio);
+        }
+        saveState();
+        elements.push(newElem);
+        selectedElementId = newElem.id;
+        renderCanvasElements();
+        renderSidebarList();
+        updateSelectedUI();
+      };
+      testImg.src = objUrl;
+      e.target.value = '';
+    });
+
+    // Initial render
+    updateSheetSize();
+    renderSidebarList();
+    updateSelectedUI();
+
+    // High-Resolution 300 DPI Export & Save to Print Queue
+    document.getElementById('f4SaveAndApplyBtn')?.addEventListener('click', async () => {
+      if (elements.length === 0) {
+        alert('Please place at least one document or ID photo on the canvas.');
+        return;
+      }
+
+      const saveBtn = document.getElementById('f4SaveAndApplyBtn');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Rendering 300 DPI Composite...';
+
+      try {
+        const curConfig = PAPER_DIMENSIONS[currentPaper][currentOrientation];
+        const exportCanvas = document.createElement('canvas');
+        exportCanvas.width = curConfig.dpiW;
+        exportCanvas.height = curConfig.dpiH;
+        const ctx = exportCanvas.getContext('2d');
+
+        // Crisp white paper background
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, curConfig.dpiW, curConfig.dpiH);
+
+        const sheetDisplayW = curConfig.width;
+        const scaleFactor = curConfig.dpiW / sheetDisplayW;
+
+        for (const elem of elements) {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          await new Promise((resolve) => {
+            img.onload = resolve;
+            img.onerror = () => resolve(); // continue if one image fails
+            img.src = elem.url;
+          });
+
+          ctx.save();
+          const targetX = elem.x * scaleFactor;
+          const targetY = elem.y * scaleFactor;
+          const targetW = (elem.width * (elem.scale / 100)) * scaleFactor;
+          const targetH = (elem.height * (elem.scale / 100)) * scaleFactor;
+
+          const centerX = targetX + (targetW / 2);
+          const centerY = targetY + (targetH / 2);
+
+          ctx.translate(centerX, centerY);
+          if (elem.rotation !== 0) {
+            ctx.rotate((elem.rotation * Math.PI) / 180);
+          }
+
+          ctx.drawImage(img, -targetW / 2, -targetH / 2, targetW, targetH);
+          ctx.restore();
+        }
+
+        saveBtn.textContent = 'Uploading Layout to Print Queue...';
+
+        const compositeBlob = await new Promise(resolve => exportCanvas.toBlob(resolve, 'image/jpeg', 0.95));
+        const compositeFileName = `${currentPaper.toUpperCase()}_Layout_${job.order_number || job.job_number}_${Date.now()}.jpg`;
+        const compositeFile = new File([compositeBlob], compositeFileName, { type: 'image/jpeg' });
+
+        // Upload to private storage
+        const upRes = await uploadCustomerPrintDocument(compositeFile, cafeId);
+        if (!upRes.success) {
+          throw new Error(upRes.error || 'Failed to upload layout to storage.');
+        }
+
+        // Call RPC to update job
+        const updateRes = await updateJobPrintLayout(cafeId, job.id, compositeFileName, upRes.filePath);
+        if (!updateRes.success) {
+          throw new Error(updateRes.error || 'Failed to update job print layout in queue.');
+        }
+
+        closeEditor();
+        showNotification('Print layout finalized & saved! Print job updated.', 'success');
+        await loadData();
+      } catch (err) {
+        console.error('Save F4 layout error:', err);
+        alert('Failed to save layout: ' + (err.message || err));
+        saveBtn.disabled = false;
+        saveBtn.textContent = '✔ Finalize & Save Print Layout';
+      }
     });
   }
 
@@ -1065,10 +1907,15 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
         </div>
 
         <div class="modal-actions mt-6" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-          <div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             ${!isCompletedOrPurged ? `
               <button class="btn btn-secondary modal-preview-doc-btn">
                 Preview Document
+              </button>
+            ` : ''}
+            ${isIdCardEligibleJob(job) && !isCompletedOrPurged ? `
+              <button class="btn btn-primary modal-open-f4-editor-btn" style="background:#2563eb;border-color:#2563eb;">
+                🪪 Edit Layout (F4/A4)
               </button>
             ` : ''}
           </div>
@@ -1134,6 +1981,11 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
     modal.querySelector('.modal-preview-doc-btn')?.addEventListener('click', () => {
       closeModal();
       openAdminDocumentPreview(job);
+    });
+
+    modal.querySelector('.modal-open-f4-editor-btn')?.addEventListener('click', () => {
+      closeModal();
+      openCafeAdminF4Editor(job);
     });
 
     modal.querySelector('.modal-send-print-btn')?.addEventListener('click', async () => {

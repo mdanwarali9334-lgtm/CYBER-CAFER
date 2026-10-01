@@ -331,3 +331,27 @@ export async function fetchJobSignedPreviewUrl(storagePath) {
     return { success: false, error: 'Preview unavailable for this file.' };
   }
 }
+
+/**
+ * Update print job with finalized F4/A4 composite layout file
+ * @param {string} cafeId
+ * @param {string} jobId
+ * @param {string} fileName
+ * @param {string} storagePath
+ */
+export async function updateJobPrintLayout(cafeId, jobId, fileName, storagePath) {
+  try {
+    const { data, error } = await supabase.rpc('cafe_admin_update_job_layout', {
+      p_cafe_id: cafeId,
+      p_job_id: jobId,
+      p_file_name: fileName,
+      p_storage_path: storagePath
+    });
+
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    console.error('Update print layout error:', err);
+    return { success: false, error: err.message || 'Failed to update job layout.' };
+  }
+}

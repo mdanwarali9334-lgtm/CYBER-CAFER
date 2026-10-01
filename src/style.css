@@ -34,6 +34,7 @@
 /* ---------------- LIGHT THEME (Warm Architectural Paper & Ink) ---------------- */
 html[data-theme="light"] {
   --bg-canvas: #F8F8F5;
+  --bg-base: #FFFFFF;
   --bg-surface: #FFFFFF;
   --bg-surface-elevated: #FFFFFF;
   --bg-surface-subtle: #F1F1EB;
@@ -77,6 +78,7 @@ html[data-theme="light"] {
 /* ---------------- DARK THEME (Obsidian Graphite & Inkwell) ---------------- */
 html[data-theme="dark"] {
   --bg-canvas: #0A0B0E;
+  --bg-base: #0A0B0E;
   --bg-surface: #121419;
   --bg-surface-elevated: #181B22;
   --bg-surface-subtle: #15171D;
@@ -3981,8 +3983,16 @@ html[data-theme="dark"] .dark-icon { display: block; }
 }
 
 .admin-metric-card:hover {
-  border-color: var(--border-hover);
+  border-color: var(--border-medium, #cbd5e1);
   transform: translateY(-2px);
+}
+
+.admin-metric-card:active,
+.admin-metric-card:focus,
+.admin-metric-card:focus-visible {
+  background: var(--bg-surface);
+  border-color: #2563eb;
+  outline: none;
 }
 
 .metric-header {
@@ -6153,9 +6163,15 @@ html[data-theme="dark"] .admin-topbar {
 }
 
 .filter-tab-pill.active {
-  background: var(--text-primary);
-  color: var(--bg-base);
-  border-color: var(--text-primary);
+  background: #2563eb !important;
+  color: #ffffff !important;
+  border-color: #2563eb !important;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+}
+
+.filter-tab-pill:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
 }
 
 /* Secondary Filter & Search Controls */
@@ -6189,6 +6205,21 @@ html[data-theme="dark"] .admin-topbar {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 16px;
+}
+
+.empty-state-card {
+  grid-column: 1 / -1;
+  background: var(--bg-surface);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-sm);
 }
 
 .job-card-editorial {
@@ -6493,8 +6524,134 @@ html[data-theme="dark"] .admin-topbar {
   text-align: right;
 }
 
+/* Overview Dashboard Components */
+.dashboard-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+@media (max-width: 900px) {
+  .dashboard-two-col {
+    grid-template-columns: 1fr;
+  }
+}
+
+.col-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-sm);
+}
+
+.col-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.col-card-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.jobs-mini-list, .device-mini-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.job-mini-item, .device-mini-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  transition: border-color var(--transition-fast);
+}
+
+.job-mini-item:hover, .device-mini-item:hover {
+  border-color: var(--border-medium);
+}
+
+.job-mini-left, .device-mini-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.empty-state-mini {
+  padding: 24px 16px;
+  text-align: center;
+  background: var(--bg-canvas);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.job-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border-radius: var(--radius-pill);
+  text-transform: uppercase;
+}
+
+.job-badge.pending { background: rgba(245, 158, 11, 0.15); color: #d97706; }
+.job-badge.queued { background: rgba(59, 130, 246, 0.15); color: #2563eb; }
+.job-badge.printing { background: rgba(139, 92, 246, 0.15); color: #7c3aed; }
+.job-badge.completed { background: rgba(16, 185, 129, 0.15); color: #059669; }
+.job-badge.failed { background: rgba(239, 68, 68, 0.15); color: #dc2626; }
+.job-badge.cancelled { background: rgba(100, 116, 139, 0.15); color: #64748b; }
+
+.overview-banner-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  box-shadow: var(--shadow-sm);
+}
+
+.banner-stats-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-indicator.online { background: #10b981; box-shadow: 0 0 8px rgba(16, 185, 129, 0.5); }
+.status-indicator.offline { background: #94a3b8; }
+
 /* ========================================================
-   A4 DOCUMENT & AADHAAR / ID CARD EDITOR STYLES
+   F4 & A4 DOCUMENT & AADHAAR / ID CARD EDITOR STYLES
    ======================================================== */
 .a4-editor-modal-card {
   max-width: 980px;
@@ -6580,6 +6737,17 @@ html[data-theme="dark"] .admin-topbar {
   height: 380px; /* 1.414 : 1 */
 }
 
+/* F4 (Foolscap / Legal) sheet dimensions */
+.a4-paper-sheet.f4-portrait {
+  width: 380px;
+  height: 583px; /* 215mm × 330mm */
+}
+
+.a4-paper-sheet.f4-landscape {
+  width: 583px;
+  height: 380px;
+}
+
 @media (max-width: 600px) {
   .a4-paper-sheet.portrait {
     width: 260px;
@@ -6587,6 +6755,14 @@ html[data-theme="dark"] .admin-topbar {
   }
   .a4-paper-sheet.landscape {
     width: 368px;
+    height: 260px;
+  }
+  .a4-paper-sheet.f4-portrait {
+    width: 260px;
+    height: 399px;
+  }
+  .a4-paper-sheet.f4-landscape {
+    width: 399px;
     height: 260px;
   }
 }
