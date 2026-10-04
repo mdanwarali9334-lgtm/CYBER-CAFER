@@ -659,6 +659,17 @@ async function initAuthStateListener() {
 
   // Listen for real-time auth changes
   onAuthStateChange((event, session, userProfile) => {
+    if (event === 'PASSWORD_RECOVERY') {
+      sessionStorage.setItem('presspoint_recovery_mode', 'true');
+      sessionStorage.removeItem('presspoint_recovery_error');
+      if (window.location.hash) {
+        window.history.replaceState(null, '', '/reset-password');
+      }
+      if (window.location.pathname !== '/reset-password') {
+        window.navigateTo('/reset-password');
+      }
+      return;
+    }
     updateNavAuthUI(session?.user || null, userProfile);
   });
 }

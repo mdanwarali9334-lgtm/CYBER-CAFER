@@ -51,14 +51,27 @@ export function normalizeAuthError(err) {
   if (!err) return null;
   const msg = (err.message || '').toLowerCase();
 
+  if (msg.includes('email not confirmed')) {
+    return 'Please verify your email before logging in. Check your inbox for the confirmation link.';
+  }
   if (msg.includes('invalid login credentials') || msg.includes('invalid_grant')) {
     return 'Invalid email or password. Please verify and try again.';
   }
   if (msg.includes('rate limit') || msg.includes('too many requests') || err.status === 429) {
     return 'Too many authentication attempts. Please wait a few moments before trying again.';
   }
-  if (msg.includes('user not found') || msg.includes('email not confirmed')) {
+  if (msg.includes('user not found')) {
     return 'Invalid email or password. Please verify and try again.';
+  }
+  if (
+    msg.includes('otp_expired') ||
+    msg.includes('token expired') ||
+    msg.includes('jwt expired') ||
+    msg.includes('recovery link is invalid or has expired') ||
+    msg.includes('email link is invalid or has expired') ||
+    (msg.includes('access_denied') && msg.includes('expired'))
+  ) {
+    return 'This password reset link has expired. Please request a new one.';
   }
   if (msg.includes('network') || msg.includes('fetch')) {
     return 'Network communication failure. Please check your internet connection.';
@@ -129,8 +142,9 @@ export async function signIn(email, password) {
     };
   }
 
-  // 2. Input validation
-  const validationErrors = validateAuthInputs(email, password);
+  // 2. Input validation & email normalization
+  const normalizedEmail = (email || '').trim().toLowerCase();
+  const validationErrors = validateAuthInputs(normalizedEmail, password);
   if (validationErrors.length > 0) {
     return { success: false, error: validationErrors[0] };
   }
@@ -139,7 +153,7 @@ export async function signIn(email, password) {
 
   try {
     const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.trim().toLowerCase(),
+      email: normalizedEmail,
       password,
     });
 
@@ -148,11 +162,17 @@ export async function signIn(email, password) {
       return { success: false, error: normalizeAuthError(error) };
     }
 
-    // 3. Fetch profile with role and cafe_id
-    const { profile, error: profileErr } = await getProfile(data.user.id);
+    // 3. Fetch profile with role and cafe_id (isolated from credential validation)
+    let profile = null;
+    try {
+      const pRes = await getProfile(data.user.id);
+      profile = pRes?.profile || null;
+    } catch (pe) {
+      console.warn('[PressPoint Auth] Profile load deferred:', pe?.message);
+    }
 
-    // 4. Check account status
-    if (profile && profile.account_status !== 'active') {
+    // 4. Check account status if profile is already loaded
+    if (profile && profile.account_status && profile.account_status !== 'active') {
       await supabase.auth.signOut();
       await logAuthEvent('login_failure', { reason: 'account_suspended' });
       return {
@@ -161,13 +181,17 @@ export async function signIn(email, password) {
       };
     }
 
-    // 5. Update last_login_at
-    await supabase
-      .from('profiles')
-      .update({ last_login_at: new Date().toISOString() })
-      .eq('id', data.user.id);
+    // 5. Update last_login_at in background
+    if (profile) {
+      supabase
+        .from('profiles')
+        .update({ last_login_at: new Date().toISOString() })
+        .eq('id', data.user.id)
+        .then(() => {})
+        .catch(() => {});
+    }
 
-    await logAuthEvent('login_success', { role: profile?.role || 'staff' });
+    await logAuthEvent('login_success', { role: profile?.role || data.user.user_metadata?.role || 'staff' });
 
     // Reset attempt counter on success
     loginAttempts = [];
@@ -176,7 +200,14 @@ export async function signIn(email, password) {
       success: true,
       user: data.user,
       session: data.session,
-      profile,
+      profile: profile || {
+        id: data.user.id,
+        email: data.user.email,
+        full_name: data.user.user_metadata?.full_name || 'Cafe Operator',
+        role: data.user.user_metadata?.role || 'staff',
+        cafe_id: data.user.user_metadata?.cafe_id || null,
+        account_status: 'active',
+      },
     };
   } catch (err) {
     await logAuthEvent('login_failure', { reason: 'exception' });
@@ -202,15 +233,16 @@ export async function signOut() {
  * Never reveals whether an email exists in the system (anti-enumeration)
  */
 export async function resetPasswordForEmail(email) {
-  const validationErrors = validateAuthInputs(email);
+  const normalizedEmail = (email || '').trim().toLowerCase();
+  const validationErrors = validateAuthInputs(normalizedEmail);
   if (validationErrors.length > 0) {
     return { success: false, error: validationErrors[0] };
   }
 
   try {
-    const redirectUrl = `${window.location.origin}/update-password`;
+    const redirectUrl = `${window.location.origin}/reset-password`;
     const { error } = await supabase.auth.resetPasswordForEmail(
-      email.trim().toLowerCase(),
+      normalizedEmail,
       { redirectTo: redirectUrl }
     );
 
@@ -481,12 +513,17 @@ export async function registerCafeAdmin({
       profile = pRes.profile;
     }
 
+    const emailConfirmationRequired = !data.session;
+
     return {
       success: true,
       user: data.user,
       session: data.session,
       profile,
-      message: 'Cafe Admin registration completed successfully.',
+      emailConfirmationRequired,
+      message: emailConfirmationRequired
+        ? 'Registration successful! Please check your email to verify your account before logging in.'
+        : 'Cafe Admin registration completed successfully.',
     };
   } catch (err) {
     await logAuthEvent('registration_failure', {

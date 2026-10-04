@@ -19,10 +19,8 @@ export function renderAuthView(routePath, container) {
     renderLoginForm(container);
   } else if (routePath === '/register') {
     renderRegistrationForm(container);
-  } else if (routePath === '/reset-password') {
+  } else if (routePath === '/reset-password' || routePath === '/update-password') {
     renderResetPasswordForm(container);
-  } else if (routePath === '/update-password') {
-    renderUpdatePasswordForm(container);
   } else if (routePath.startsWith('/admin') || routePath.startsWith('/super-admin') || routePath.startsWith('/cafe') || routePath.startsWith('/staff')) {
     renderProtectedRoute(routePath, container);
   } else if (routePath === '/security-tests') {
@@ -172,7 +170,7 @@ function renderLoginForm(container) {
   const form = document.getElementById('loginFormMain');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const email = document.getElementById('loginEmail').value;
+    const email = (document.getElementById('loginEmail').value || '').trim();
     const password = document.getElementById('loginPassword').value;
     const alertBox = document.getElementById('authAlertBox');
     const spinner = document.getElementById('loginSpinner');
@@ -586,6 +584,62 @@ function renderRegistrationForm(container) {
   }
 
   function renderSuccessView(result, s) {
+    const emailConfirmationRequired = result?.emailConfirmationRequired ?? (!result?.session);
+
+    if (emailConfirmationRequired) {
+      container.innerHTML = `
+        <div class="auth-page-wrapper">
+          <div class="auth-card-editorial text-center reg-success-card">
+            <div class="reg-success-icon-badge" style="background: rgba(37, 99, 235, 0.12); color: var(--primary);">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                <polyline points="22,6 12,13 2,6"/>
+              </svg>
+            </div>
+            <span class="pill-tag font-mono">ACTION REQUIRED &bull; VERIFY EMAIL</span>
+            <h1 class="editorial-h2">Confirm Your Email Address</h1>
+            <p class="auth-subtext">
+              Your cafe administrator account for <strong>${escapeHtml(s.cafeName)}</strong> has been registered!
+              A verification email has been dispatched to <strong>${escapeHtml(s.email)}</strong>.
+            </p>
+
+            <div class="reg-server-notice" style="text-align: left; margin: 20px 0; background: rgba(37, 99, 235, 0.08); border-color: rgba(37, 99, 235, 0.25);">
+              <svg viewBox="0 0 16 16" fill="currentColor" class="lock-mini"><path d="M8 1a2 2 0 0 0-2 2v2H5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-1V3a2 2 0 0 0-2-2zm1 4H7V3a1 1 0 0 1 2 0v2z"/></svg>
+              <p>
+                <strong>Email Verification Required:</strong> Please check your inbox and click the confirmation link before attempting to sign in. Once verified, return to login with your password.
+              </p>
+            </div>
+
+            <div class="reg-summary-box font-mono">
+              <div class="summary-line">
+                <span class="lbl">Registered Email:</span>
+                <strong class="val text-accent">${escapeHtml(s.email)}</strong>
+              </div>
+              <div class="summary-line">
+                <span class="lbl">Linked Cafe:</span>
+                <span class="val">${escapeHtml(s.cafeName)}</span>
+              </div>
+              <div class="summary-line">
+                <span class="lbl">Verification Status:</span>
+                <span class="val" style="color: #eab308;">&bull; Pending Confirmation</span>
+              </div>
+            </div>
+
+            <div class="auth-actions-group">
+              <a href="/login" class="btn btn-primary btn-xl">
+                <span>Go to Sign In</span>
+                <svg class="btn-arrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 8h10M9 4l4 4-4 4"/>
+                </svg>
+              </a>
+              <a href="/" class="btn btn-secondary btn-xl">Public Landing Page</a>
+            </div>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
     container.innerHTML = `
       <div class="auth-page-wrapper">
         <div class="auth-card-editorial text-center reg-success-card">
@@ -643,14 +697,230 @@ function renderRegistrationForm(container) {
 }
 
 /**
- * 3. Password Reset Request Form
+ * 3. Password Reset & Account Recovery Controller
  */
 function renderResetPasswordForm(container) {
+  const isExpired = sessionStorage.getItem('presspoint_recovery_error') === 'otp_expired';
+  const isRecoveryMode = sessionStorage.getItem('presspoint_recovery_mode') === 'true';
+
+  if (isExpired) {
+    renderExpiredLinkView(container);
+  } else if (isRecoveryMode) {
+    renderSetNewPasswordView(container);
+  } else {
+    renderRequestResetView(container);
+  }
+}
+
+function renderExpiredLinkView(container) {
+  container.innerHTML = `
+    <div class="auth-page-wrapper">
+      <div class="auth-card-editorial text-center">
+        <div class="reg-success-icon-badge" style="background: rgba(239, 68, 68, 0.12); color: var(--danger, #ef4444);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        </div>
+        <span class="pill-tag font-mono" style="color: var(--danger, #ef4444);">LINK EXPIRED</span>
+        <h1 class="editorial-h2">Recovery Link Expired</h1>
+        <p class="auth-subtext">
+          This password reset link has expired. Please request a new one.
+        </p>
+
+        <div class="reg-server-notice" style="text-align: left; margin: 20px 0;">
+          <svg viewBox="0 0 16 16" fill="currentColor" class="lock-mini"><path d="M8 1a2 2 0 0 0-2 2v2H5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-1V3a2 2 0 0 0-2-2zm1 4H7V3a1 1 0 0 1 2 0v2z"/></svg>
+          <p>
+            For security reasons, password recovery tokens expire quickly after dispatch or after first use. You can request a new reset link below.
+          </p>
+        </div>
+
+        <div class="auth-actions-group">
+          <button type="button" class="btn btn-primary btn-xl" id="requestNewResetLinkBtn">
+            <span>Request New Reset Link</span>
+            <svg class="btn-arrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 8h10M9 4l4 4-4 4"/>
+            </svg>
+          </button>
+          <a href="/login" class="btn btn-secondary btn-xl">Return to Sign In</a>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('requestNewResetLinkBtn')?.addEventListener('click', () => {
+    sessionStorage.removeItem('presspoint_recovery_error');
+    sessionStorage.removeItem('presspoint_recovery_mode');
+    renderResetPasswordForm(container);
+  });
+}
+
+function renderSetNewPasswordView(container) {
   container.innerHTML = `
     <div class="auth-page-wrapper">
       <div class="auth-card-editorial">
         <div class="auth-header">
           <a href="/" class="auth-brand-link">
+            <span class="brand-symbol" aria-hidden="true">
+              <svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.8">
+                <rect x="2" y="2" width="24" height="24" rx="5"/>
+                <path d="M7 8H21M7 13H17M7 18H14"/>
+                <circle cx="20.5" cy="18.5" r="2" fill="var(--text-accent)"/>
+              </svg>
+            </span>
+            <span class="brand-name">PressPoint</span>
+          </a>
+          <span class="pill-tag font-mono">ACCOUNT RECOVERY</span>
+          <h1 class="auth-title">Reset Password</h1>
+          <p class="auth-subtext">Enter and confirm your new password below to update your account credentials.</p>
+        </div>
+
+        <div class="auth-alert-box" id="resetAlertBox" style="display: none;" role="alert"></div>
+
+        <form class="auth-form" id="setNewPasswordForm" novalidate>
+          <div class="auth-input-group">
+            <label for="newPassword" class="auth-label">New Password (min 8 characters)</label>
+            <div class="password-input-wrap">
+              <input 
+                type="password" 
+                id="newPassword" 
+                class="auth-input" 
+                placeholder="••••••••••••" 
+                autocomplete="new-password"
+                required 
+              />
+              <button type="button" class="btn-toggle-pwd" id="toggleNewPwdBtn" aria-label="Toggle password visibility">
+                <svg id="eyeIconNew" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" class="eye-svg">
+                  <path d="M1 10s3-6 9-6 9 6 9 6-3 6-9 6-9-6-9-6z"/>
+                  <circle cx="10" cy="10" r="3"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="auth-input-group">
+            <label for="confirmNewPassword" class="auth-label">Confirm New Password</label>
+            <div class="password-input-wrap">
+              <input 
+                type="password" 
+                id="confirmNewPassword" 
+                class="auth-input" 
+                placeholder="••••••••••••" 
+                autocomplete="new-password"
+                required 
+              />
+              <button type="button" class="btn-toggle-pwd" id="toggleConfirmNewPwdBtn" aria-label="Toggle password visibility">
+                <svg id="eyeIconConfirm" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" class="eye-svg">
+                  <path d="M1 10s3-6 9-6 9 6 9 6-3 6-9 6-9-6-9-6z"/>
+                  <circle cx="10" cy="10" r="3"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-xl w-full" id="submitUpdatePasswordBtn">
+            <span class="btn-spinner" id="updateSpinner" style="display: none;"></span>
+            <span id="updateBtnLabel">Update Password</span>
+          </button>
+        </form>
+
+        <div class="auth-bottom-nav">
+          <a href="/login" class="auth-back-link">&larr; Return to Sign In</a>
+        </div>
+      </div>
+    </div>
+  `;
+
+  setupPasswordToggle('newPassword', 'toggleNewPwdBtn', 'eyeIconNew');
+  setupPasswordToggle('confirmNewPassword', 'toggleConfirmNewPwdBtn', 'eyeIconConfirm');
+
+  const form = document.getElementById('setNewPasswordForm');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const newPassword = document.getElementById('newPassword').value;
+    const confirmNewPassword = document.getElementById('confirmNewPassword').value;
+    const alertBox = document.getElementById('resetAlertBox');
+    const spinner = document.getElementById('updateSpinner');
+    const label = document.getElementById('updateBtnLabel');
+    const submitBtn = document.getElementById('submitUpdatePasswordBtn');
+
+    alertBox.style.display = 'none';
+
+    // 1. Local validation before calling Supabase
+    if (!newPassword) {
+      alertBox.className = 'auth-alert-box alert-error';
+      alertBox.textContent = 'Password is required.';
+      alertBox.style.display = 'block';
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      alertBox.className = 'auth-alert-box alert-error';
+      alertBox.textContent = 'Password must be at least 8 characters in length.';
+      alertBox.style.display = 'block';
+      return;
+    }
+
+    if (newPassword.length > 72) {
+      alertBox.className = 'auth-alert-box alert-error';
+      alertBox.textContent = 'Password must not exceed 72 characters.';
+      alertBox.style.display = 'block';
+      return;
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      alertBox.className = 'auth-alert-box alert-error';
+      alertBox.textContent = 'Passwords do not match.';
+      alertBox.style.display = 'block';
+      return;
+    }
+
+    // 2. Perform Supabase password update
+    submitBtn.disabled = true;
+    spinner.style.display = 'inline-block';
+    label.textContent = 'Updating Password...';
+
+    const result = await updatePassword(newPassword);
+
+    submitBtn.disabled = false;
+    spinner.style.display = 'none';
+    label.textContent = 'Update Password';
+
+    if (!result.success) {
+      alertBox.className = 'auth-alert-box alert-error';
+      alertBox.textContent = result.error;
+      alertBox.style.display = 'block';
+    } else {
+      alertBox.className = 'auth-alert-box alert-success';
+      alertBox.textContent = 'Password updated successfully! Redirecting to sign in...';
+      alertBox.style.display = 'block';
+
+      // Clear recovery state & sign out of recovery session
+      sessionStorage.removeItem('presspoint_recovery_mode');
+      sessionStorage.removeItem('presspoint_recovery_error');
+      await signOut();
+
+      setTimeout(() => {
+        window.navigateTo('/login');
+      }, 1500);
+    }
+  });
+}
+
+function renderRequestResetView(container) {
+  container.innerHTML = `
+    <div class="auth-page-wrapper">
+      <div class="auth-card-editorial">
+        <div class="auth-header">
+          <a href="/" class="auth-brand-link">
+            <span class="brand-symbol" aria-hidden="true">
+              <svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.8">
+                <rect x="2" y="2" width="24" height="24" rx="5"/>
+                <path d="M7 8H21M7 13H17M7 18H14"/>
+                <circle cx="20.5" cy="18.5" r="2" fill="var(--text-accent)"/>
+              </svg>
+            </span>
             <span class="brand-name">PressPoint</span>
           </a>
           <span class="pill-tag font-mono">ACCOUNT RECOVERY</span>
@@ -680,7 +950,7 @@ function renderResetPasswordForm(container) {
         </form>
 
         <div class="auth-bottom-nav">
-          <a href="/login" class="auth-back-link">&larr; Back to Sign In</a>
+          <a href="/login" class="auth-back-link">&larr; Return to Sign In</a>
         </div>
       </div>
     </div>
@@ -689,7 +959,7 @@ function renderResetPasswordForm(container) {
   const form = document.getElementById('resetPasswordForm');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const email = document.getElementById('resetEmail').value;
+    const email = document.getElementById('resetEmail').value.trim();
     const alertBox = document.getElementById('resetAlertBox');
     const spinner = document.getElementById('resetSpinner');
     const label = document.getElementById('resetBtnLabel');
@@ -711,86 +981,8 @@ function renderResetPasswordForm(container) {
   });
 }
 
-/**
- * 3. Update Password Form (Recovery flow)
- */
 function renderUpdatePasswordForm(container) {
-  container.innerHTML = `
-    <div class="auth-page-wrapper">
-      <div class="auth-card-editorial">
-        <div class="auth-header">
-          <span class="pill-tag font-mono">SECURITY CREDENTIALS</span>
-          <h1 class="auth-title">Create new password</h1>
-          <p class="auth-subtext">Choose a strong, unique password for your cyber cafe account.</p>
-        </div>
-
-        <div class="auth-alert-box" id="updateAlertBox" style="display: none;" role="alert"></div>
-
-        <form class="auth-form" id="updatePasswordForm" novalidate>
-          <div class="auth-input-group">
-            <label for="newPassword" class="auth-label">New Password (min 8 chars)</label>
-            <div class="password-input-wrap">
-              <input 
-                type="password" 
-                id="newPassword" 
-                class="auth-input" 
-                placeholder="••••••••••••" 
-                required 
-              />
-              <button type="button" class="btn-toggle-pwd" id="toggleNewPwdBtn" aria-label="Toggle password visibility">
-                <svg id="eyeIconNew" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" class="eye-svg">
-                  <path d="M1 10s3-6 9-6 9 6 9 6-3 6-9 6-9-6-9-6z"/>
-                  <circle cx="10" cy="10" r="3"/>
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          <button type="submit" class="btn btn-primary btn-xl w-full" id="submitUpdatePwdBtn">
-            <span class="btn-spinner" id="updateSpinner" style="display: none;"></span>
-            <span id="updateBtnLabel">Update Password</span>
-          </button>
-        </form>
-
-        <div class="auth-bottom-nav">
-          <a href="/login" class="auth-back-link">&larr; Back to Sign In</a>
-        </div>
-      </div>
-    </div>
-  `;
-
-  setupPasswordToggle('newPassword', 'toggleNewPwdBtn', 'eyeIconNew');
-
-  const form = document.getElementById('updatePasswordForm');
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const pwd = document.getElementById('newPassword').value;
-    const alertBox = document.getElementById('updateAlertBox');
-    const spinner = document.getElementById('updateSpinner');
-    const label = document.getElementById('updateBtnLabel');
-    const submitBtn = document.getElementById('submitUpdatePwdBtn');
-
-    submitBtn.disabled = true;
-    spinner.style.display = 'inline-block';
-    label.textContent = 'Updating...';
-
-    const result = await updatePassword(pwd);
-
-    submitBtn.disabled = false;
-    spinner.style.display = 'none';
-    label.textContent = 'Update Password';
-
-    if (!result.success) {
-      alertBox.className = 'auth-alert-box alert-error';
-      alertBox.textContent = result.error;
-      alertBox.style.display = 'block';
-    } else {
-      alertBox.className = 'auth-alert-box alert-success';
-      alertBox.textContent = 'Password updated successfully! Please sign in with your new credentials.';
-      alertBox.style.display = 'block';
-      setTimeout(() => window.navigateTo('/login'), 1200);
-    }
-  });
+  renderResetPasswordForm(container);
 }
 
 /**
