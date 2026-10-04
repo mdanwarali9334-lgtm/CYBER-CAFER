@@ -912,21 +912,40 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
   // ----------------------------------------------------
   function isIdCardEligibleJob(job) {
     if (!job) return false;
-    if (job.doc_type === 'aadhaar' || job.doc_type === 'other_id') return true;
-    const isImageFile = (name) => /\.(jpe?g|png|webp|bmp)$/i.test(name || '');
-    const idKeywords = /(aadhaar|aadhar|pan|voter|license|licence|identity|id[_\s-]?card|front|back|govt?|document)/i;
 
-    if (idKeywords.test(job.file_name || '')) return true;
+    // 1. Explicit doc_type check:
+    // If explicitly marked as 'normal' document, never show ID card editor
+    if (job.doc_type === 'normal') {
+      return false;
+    }
+    // If explicitly marked as an ID card type
+    if (job.doc_type === 'aadhaar' || job.doc_type === 'other_id' || job.doc_type === 'id_card') {
+      return true;
+    }
 
+    // 2. Check files_metadata: if customer uploaded with dedicated side 'front' or 'back'
     if (Array.isArray(job.files_metadata) && job.files_metadata.length > 0) {
-      const imgFiles = job.files_metadata.filter(f => (f.type && f.type.startsWith('image/')) || isImageFile(f.name));
-      if (imgFiles.length >= 2) return true;
-      for (const f of job.files_metadata) {
-        if (idKeywords.test(f.name || '')) return true;
+      const hasIdSlot = job.files_metadata.some(f => f.side === 'front' || f.side === 'back');
+      if (hasIdSlot) return true;
+
+      // If files metadata explicitly marked doc_type === 'normal'
+      const isExplicitNormal = job.files_metadata.some(f => f.doc_type === 'normal');
+      if (isExplicitNormal) return false;
+    }
+
+    // 3. Fallback for legacy orders where doc_type was not captured:
+    // Strictly require explicit ID card identity keywords (never generic 'document' or generic image extension)
+    if (!job.doc_type) {
+      const explicitIdPattern = /(?:^|[^a-zA-Z0-9])(aadhaar|aadhar|voter[_\s-]?id|pan[_\s-]?card|identity[_\s-]?card|id[_\s-]?card|driving[_\s-]?licen[cs]e)(?:$|[^a-zA-Z0-9])/i;
+      if (explicitIdPattern.test(job.file_name || '')) return true;
+
+      if (Array.isArray(job.files_metadata)) {
+        for (const f of job.files_metadata) {
+          if (explicitIdPattern.test(f.name || '')) return true;
+        }
       }
     }
 
-    if (isImageFile(job.file_name)) return true;
     return false;
   }
 
@@ -1003,8 +1022,8 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
         landscape: { width: 594, height: 420, dpiW: 3508, dpiH: 2480, label: 'A4: 297 × 210 mm' }
       },
       f4: {
-        portrait: { width: 420, height: 645, dpiW: 2540, dpiH: 3898, label: 'F4: 215 × 330 mm (Legal)' },
-        landscape: { width: 645, height: 420, dpiW: 3898, dpiH: 2540, label: 'F4: 330 × 215 mm (Legal)' }
+        portrait: { width: 420, height: 645, dpiW: 2540, dpiH: 3898, label: 'F4 Standard: 215 × 330 mm' },
+        landscape: { width: 645, height: 420, dpiW: 3898, dpiH: 2540, label: 'F4 Standard: 330 × 215 mm' }
       }
     };
 
@@ -1043,7 +1062,7 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
           <!-- Paper Size Toggle -->
           <div style="display:flex;gap:5px;align-items:center;">
             <span class="a4-control-label">Paper:</span>
-            <button type="button" class="btn btn-xs ${currentPaper === 'f4' ? 'btn-primary' : 'btn-secondary'}" id="paperF4Btn" title="F4 (Foolscap / Legal 215×330mm)">F4 Legal</button>
+            <button type="button" class="btn btn-xs ${currentPaper === 'f4' ? 'btn-primary' : 'btn-secondary'}" id="paperF4Btn" title="F4 Standard (Foolscap 215×330mm)">F4 Standard</button>
             <button type="button" class="btn btn-xs ${currentPaper === 'a4' ? 'btn-primary' : 'btn-secondary'}" id="paperA4Btn" title="A4 Standard (210×297mm)">A4 Standard</button>
           </div>
 
@@ -1297,7 +1316,7 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
         label.textContent = `${curConfig.label} (${currentOrientation.toUpperCase()})`;
       }
       if (footerInfo) {
-        footerInfo.textContent = `${currentPaper.toUpperCase()} ${currentOrientation} &bull; 300 DPI Export (${curConfig.dpiW}×${curConfig.dpiH} px)`;
+        footerInfo.innerHTML = `${currentPaper === 'f4' ? 'F4 Standard' : 'A4 Standard'} (${currentOrientation}) &bull; 300 DPI Export (${curConfig.dpiW}×${curConfig.dpiH} px)`;
       }
 
       // Update toggle buttons
@@ -1569,7 +1588,7 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
         // Quick-bar actions
         item.querySelector('.quick-crop-btn')?.addEventListener('click', (e) => {
           e.stopPropagation();
-          startInPlaceCrop(elem);
+          openIdCardCroppingModal(elem);
         });
 
         item.querySelector('.quick-rot-ccw')?.addEventListener('click', (e) => {
@@ -1705,88 +1724,241 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
       window.addEventListener('pointerup', onUp);
     }
 
-    // In-Place Smooth Crop Engine
-    function startInPlaceCrop(elem) {
-      croppingElementId = elem.id;
-      const sheet = document.getElementById('f4PaperSheet');
-      if (!sheet) return;
+    // Centered Clean ID Card Cropping Modal Dialog
+    function openIdCardCroppingModal(elem) {
+      if (!elem) return;
 
-      // Existing crop overlays cleanup
-      sheet.querySelectorAll('.elem-crop-overlay').forEach(el => el.remove());
+      const cardIdx = elements.findIndex(el => el.id === elem.id);
+      const cardSideLabel = cardIdx === 0 ? 'Front Side' : (cardIdx === 1 ? 'Back Side' : `Card #${cardIdx + 1}`);
 
-      const domItem = sheet.querySelector(`.a4-canvas-element[data-id="${elem.id}"]`);
-      if (!domItem) return;
+      const cropModalId = 'idCardCroppingModal';
+      const existing = document.getElementById(cropModalId);
+      if (existing) existing.remove();
 
-      const cropOverlay = document.createElement('div');
-      cropOverlay.className = 'elem-crop-overlay';
+      const cropModal = document.createElement('div');
+      cropModal.id = cropModalId;
+      cropModal.className = 'admin-modal-backdrop id-card-crop-modal-backdrop';
+      cropModal.style.cssText = 'display:flex;position:fixed;top:0;left:0;right:0;bottom:0;z-index:10005;';
 
-      const scaledW = Math.round(elem.width * (elem.scale / 100));
-      const scaledH = Math.round(elem.height * (elem.scale / 100));
+      cropModal.innerHTML = `
+        <div class="id-card-crop-modal-card">
+          <!-- Modal Header -->
+          <div class="a4-editor-header" style="padding:12px 18px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="width:32px;height:32px;border-radius:6px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.3);display:flex;align-items:center;justify-content:center;font-size:1.1rem;">
+                ✂️
+              </div>
+              <div>
+                <h3 class="font-bold text-sm" style="margin:0;line-height:1.2;">Crop ID Card &bull; ${escapeHtml(cardSideLabel)}</h3>
+                <span class="text-xs text-muted font-mono truncate" style="max-width:280px;display:inline-block;">${escapeHtml(elem.name)}</span>
+              </div>
+            </div>
+            <button type="button" class="btn btn-sm btn-ghost close-crop-modal-btn" aria-label="Close" style="font-size:1.3rem;line-height:1;padding:2px 8px;">&times;</button>
+          </div>
 
-      cropOverlay.style.left = `${elem.x}px`;
-      cropOverlay.style.top = `${elem.y}px`;
-      cropOverlay.style.width = `${scaledW}px`;
-      cropOverlay.style.height = `${scaledH}px`;
+          <!-- Toolbar -->
+          <div class="crop-modal-toolbar">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span class="text-xs text-muted" style="font-weight:600;">Ratio:</span>
+              <button type="button" class="btn btn-xs btn-primary" id="cropRatioFreeBtn">Free Aspect</button>
+              <button type="button" class="btn btn-xs btn-secondary" id="cropRatioIdBtn" title="Standard ID Card (85.6 × 54 mm &bull; 1.585:1)">🪪 Standard ID (1.58:1)</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <button type="button" class="btn btn-xs btn-secondary" id="cropResetFullBtn" title="Reset crop to full uncropped image">↺ Reset to Full</button>
+            </div>
+          </div>
 
-      // Crop box state inside image bounds
-      let cropState = {
-        x: Math.round(scaledW * 0.05),
-        y: Math.round(scaledH * 0.05),
-        w: Math.round(scaledW * 0.9),
-        h: Math.round(scaledH * 0.9)
-      };
+          <!-- Body: Stage + Live Preview -->
+          <div class="crop-modal-body">
+            <div class="crop-modal-stage" id="cropModalStage">
+              <div class="crop-stage-container" id="cropStageContainer">
+                <img id="cropModalTargetImg" src="${escapeHtml(elem.originalUrl || elem.url)}" alt="Target Crop" crossorigin="anonymous" draggable="false" />
+                <div class="modal-crop-box" id="modalCropBox">
+                  <div class="crop-grid-line h1"></div>
+                  <div class="crop-grid-line h2"></div>
+                  <div class="crop-grid-line v1"></div>
+                  <div class="crop-grid-line v2"></div>
+                  <div class="crop-handle nw" data-h="nw"></div>
+                  <div class="crop-handle n" data-h="n"></div>
+                  <div class="crop-handle ne" data-h="ne"></div>
+                  <div class="crop-handle e" data-h="e"></div>
+                  <div class="crop-handle se" data-h="se"></div>
+                  <div class="crop-handle s" data-h="s"></div>
+                  <div class="crop-handle sw" data-h="sw"></div>
+                  <div class="crop-handle w" data-h="w"></div>
+                </div>
+              </div>
+            </div>
 
-      cropOverlay.innerHTML = `
-        <div class="elem-crop-box" id="activeCropBox" style="left:${cropState.x}px;top:${cropState.y}px;width:${cropState.w}px;height:${cropState.h}px;">
-          <div class="crop-grid-line h1"></div>
-          <div class="crop-grid-line h2"></div>
-          <div class="crop-grid-line v1"></div>
-          <div class="crop-grid-line v2"></div>
-          <div class="crop-handle nw" data-h="nw"></div>
-          <div class="crop-handle n" data-h="n"></div>
-          <div class="crop-handle ne" data-h="ne"></div>
-          <div class="crop-handle e" data-h="e"></div>
-          <div class="crop-handle se" data-h="se"></div>
-          <div class="crop-handle s" data-h="s"></div>
-          <div class="crop-handle sw" data-h="sw"></div>
-          <div class="crop-handle w" data-h="w"></div>
-        </div>
+            <!-- Preview Panel -->
+            <div class="crop-modal-preview-panel">
+              <div class="text-xs font-bold" style="color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;">Live Preview</div>
+              <div class="crop-preview-wrap">
+                <canvas id="cropPreviewCanvas" width="180" height="114"></canvas>
+              </div>
+              <div class="font-mono text-xs text-muted" id="cropDimensionInfo" style="text-align:center;">---</div>
+              <div class="text-xs text-muted text-center" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 6px;line-height:1.4;">
+                <span style="color:#10b981;font-weight:600;">🔒 Isolated Crop</span><br>
+                Only <strong>${escapeHtml(cardSideLabel)}</strong> will be updated. Other card side remains unchanged.
+              </div>
+            </div>
+          </div>
 
-        <div class="crop-action-bar" style="top:${scaledH + 12}px;">
-          <button type="button" class="crop-action-btn apply-btn" id="cropApplyBtn">✔ Apply Crop</button>
-          <button type="button" class="crop-action-btn reset-btn" id="cropResetBtn">↺ Full Image</button>
-          <button type="button" class="crop-action-btn cancel-btn" id="cropCancelBtn">✕ Cancel</button>
+          <!-- Modal Footer Actions -->
+          <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;padding:12px 18px;border-top:1px solid var(--border-subtle);background:var(--bg-canvas);">
+            <button type="button" class="btn btn-secondary close-crop-modal-btn">Cancel</button>
+            <button type="button" class="btn btn-primary" id="cropApplyModalBtn" style="background:#10b981;border-color:#10b981;font-weight:600;">
+              ✔ Apply Crop
+            </button>
+          </div>
         </div>
       `;
 
-      sheet.appendChild(cropOverlay);
+      document.body.appendChild(cropModal);
 
-      const cropBox = cropOverlay.querySelector('#activeCropBox');
+      const targetImg = cropModal.querySelector('#cropModalTargetImg');
+      const cropBox = cropModal.querySelector('#modalCropBox');
+      const previewCanvas = cropModal.querySelector('#cropPreviewCanvas');
+      const previewCtx = previewCanvas.getContext('2d');
+      const dimInfo = cropModal.querySelector('#cropDimensionInfo');
+      const freeBtn = cropModal.querySelector('#cropRatioFreeBtn');
+      const idBtn = cropModal.querySelector('#cropRatioIdBtn');
+
+      let aspectRatioLock = null; // null for free, or number like 1.585
+      let cropState = { x: 0, y: 0, w: 100, h: 100 };
+      let imgDispW = 100;
+      let imgDispH = 100;
+
+      const closeCropModal = () => {
+        cropModal.remove();
+      };
+
+      cropModal.querySelectorAll('.close-crop-modal-btn').forEach(b => b.addEventListener('click', closeCropModal));
 
       function updateCropBoxDOM() {
         cropBox.style.left = `${cropState.x}px`;
         cropBox.style.top = `${cropState.y}px`;
         cropBox.style.width = `${cropState.w}px`;
         cropBox.style.height = `${cropState.h}px`;
+        updateLivePreview();
       }
 
-      // Move crop box inside image
+      function updateLivePreview() {
+        if (!targetImg.naturalWidth || !targetImg.naturalHeight || imgDispW === 0 || imgDispH === 0) return;
+
+        const natW = targetImg.naturalWidth;
+        const natH = targetImg.naturalHeight;
+
+        const fracX = Math.max(0, cropState.x / imgDispW);
+        const fracY = Math.max(0, cropState.y / imgDispH);
+        const fracW = Math.min(1 - fracX, cropState.w / imgDispW);
+        const fracH = Math.min(1 - fracY, cropState.h / imgDispH);
+
+        const sx = Math.round(fracX * natW);
+        const sy = Math.round(fracY * natH);
+        const sw = Math.max(1, Math.round(fracW * natW));
+        const sh = Math.max(1, Math.round(fracH * natH));
+
+        if (dimInfo) {
+          dimInfo.textContent = `${sw} × ${sh} px`;
+        }
+
+        previewCanvas.width = 180;
+        previewCanvas.height = 114;
+        previewCtx.clearRect(0, 0, 180, 114);
+
+        const pRatio = sw / sh;
+        let dw = 180;
+        let dh = Math.round(180 / pRatio);
+        if (dh > 114) {
+          dh = 114;
+          dw = Math.round(114 * pRatio);
+        }
+        const dx = Math.round((180 - dw) / 2);
+        const dy = Math.round((114 - dh) / 2);
+
+        try {
+          previewCtx.drawImage(targetImg, sx, sy, sw, sh, dx, dy, dw, dh);
+        } catch (_) {}
+      }
+
+      function applyRatioToState(r) {
+        if (!r) return;
+        let newH = Math.round(cropState.w / r);
+        if (cropState.y + newH > imgDispH) {
+          newH = imgDispH - cropState.y;
+          cropState.w = Math.round(newH * r);
+        }
+        cropState.h = Math.max(20, newH);
+      }
+
+      function initGeometry() {
+        imgDispW = targetImg.clientWidth || 300;
+        imgDispH = targetImg.clientHeight || 200;
+
+        cropState = {
+          x: Math.round(imgDispW * 0.05),
+          y: Math.round(imgDispH * 0.05),
+          w: Math.round(imgDispW * 0.9),
+          h: Math.round(imgDispH * 0.9)
+        };
+
+        if (aspectRatioLock) {
+          applyRatioToState(aspectRatioLock);
+        }
+
+        updateCropBoxDOM();
+      }
+
+      if (targetImg.complete && targetImg.naturalWidth > 0) {
+        initGeometry();
+      } else {
+        targetImg.onload = initGeometry;
+      }
+
+      freeBtn.addEventListener('click', () => {
+        aspectRatioLock = null;
+        freeBtn.className = 'btn btn-xs btn-primary';
+        idBtn.className = 'btn btn-xs btn-secondary';
+      });
+
+      idBtn.addEventListener('click', () => {
+        aspectRatioLock = 1.585;
+        idBtn.className = 'btn btn-xs btn-primary';
+        freeBtn.className = 'btn btn-xs btn-secondary';
+        applyRatioToState(aspectRatioLock);
+        updateCropBoxDOM();
+      });
+
+      cropModal.querySelector('#cropResetFullBtn')?.addEventListener('click', () => {
+        cropState = {
+          x: 0,
+          y: 0,
+          w: imgDispW,
+          h: imgDispH
+        };
+        if (aspectRatioLock) {
+          applyRatioToState(aspectRatioLock);
+        }
+        updateCropBoxDOM();
+      });
+
       cropBox.addEventListener('pointerdown', (e) => {
         if (e.target.classList.contains('crop-handle')) return;
         e.preventDefault();
         e.stopPropagation();
 
-        const startX = e.clientX;
-        const startY = e.clientY;
+        const startClientX = e.clientX;
+        const startClientY = e.clientY;
         const origX = cropState.x;
         const origY = cropState.y;
 
         function onMove(mEvt) {
-          const dx = (mEvt.clientX - startX) / currentZoom;
-          const dy = (mEvt.clientY - startY) / currentZoom;
+          const dx = mEvt.clientX - startClientX;
+          const dy = mEvt.clientY - startClientY;
 
-          cropState.x = Math.max(0, Math.min(scaledW - cropState.w, origX + dx));
-          cropState.y = Math.max(0, Math.min(scaledH - cropState.h, origY + dy));
+          cropState.x = Math.max(0, Math.min(imgDispW - cropState.w, origX + dx));
+          cropState.y = Math.max(0, Math.min(imgDispH - cropState.h, origY + dy));
           updateCropBoxDOM();
         }
 
@@ -1799,26 +1971,25 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
         window.addEventListener('pointerup', onUp);
       });
 
-      // Handle resize of crop box
-      cropOverlay.querySelectorAll('.crop-handle').forEach(h => {
+      cropBox.querySelectorAll('.crop-handle').forEach(h => {
         h.addEventListener('pointerdown', (e) => {
           e.preventDefault();
           e.stopPropagation();
 
           const dir = h.getAttribute('data-h');
-          const startX = e.clientX;
-          const startY = e.clientY;
+          const startClientX = e.clientX;
+          const startClientY = e.clientY;
           const orig = { ...cropState };
 
           function onMove(mEvt) {
-            const dx = (mEvt.clientX - startX) / currentZoom;
-            const dy = (mEvt.clientY - startY) / currentZoom;
+            const dx = mEvt.clientX - startClientX;
+            const dy = mEvt.clientY - startClientY;
 
             if (dir.includes('e')) {
-              cropState.w = Math.max(30, Math.min(scaledW - orig.x, orig.w + dx));
+              cropState.w = Math.max(30, Math.min(imgDispW - orig.x, orig.w + dx));
             }
             if (dir.includes('s')) {
-              cropState.h = Math.max(30, Math.min(scaledH - orig.y, orig.h + dy));
+              cropState.h = Math.max(30, Math.min(imgDispH - orig.y, orig.h + dy));
             }
             if (dir.includes('w')) {
               const maxLeft = orig.x + orig.w - 30;
@@ -1831,6 +2002,14 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
               const newY = Math.max(0, Math.min(maxTop, orig.y + dy));
               cropState.h = orig.h + (orig.y - newY);
               cropState.y = newY;
+            }
+
+            if (aspectRatioLock) {
+              if (dir.includes('e') || dir.includes('w')) {
+                cropState.h = Math.max(20, Math.min(imgDispH - cropState.y, Math.round(cropState.w / aspectRatioLock)));
+              } else {
+                cropState.w = Math.max(20, Math.min(imgDispW - cropState.x, Math.round(cropState.h * aspectRatioLock)));
+              }
             }
 
             updateCropBoxDOM();
@@ -1846,102 +2025,63 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
         });
       });
 
-      // Apply Crop
-      cropOverlay.querySelector('#cropApplyBtn')?.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const applyBtn = cropOverlay.querySelector('#cropApplyBtn');
-        applyBtn.textContent = 'Cropping...';
+      cropModal.querySelector('#cropApplyModalBtn')?.addEventListener('click', async () => {
+        const applyBtn = cropModal.querySelector('#cropApplyModalBtn');
+        applyBtn.textContent = 'Processing Crop...';
         applyBtn.disabled = true;
 
         try {
           saveState();
 
-          // Calculate normalized fractions
-          const cropFracX = cropState.x / scaledW;
-          const cropFracY = cropState.y / scaledH;
-          const cropFracW = cropState.w / scaledW;
-          const cropFracH = cropState.h / scaledH;
+          const natW = targetImg.naturalWidth;
+          const natH = targetImg.naturalHeight;
 
-          // Load original image to preserve full resolution
-          const sourceImg = new Image();
-          sourceImg.crossOrigin = 'anonymous';
-          await new Promise((resolve, reject) => {
-            sourceImg.onload = resolve;
-            sourceImg.onerror = () => reject(new Error('Failed to load image for crop.'));
-            sourceImg.src = elem.originalUrl || elem.url;
-          });
+          const fracX = Math.max(0, cropState.x / imgDispW);
+          const fracY = Math.max(0, cropState.y / imgDispH);
+          const fracW = Math.min(1 - fracX, cropState.w / imgDispW);
+          const fracH = Math.min(1 - fracY, cropState.h / imgDispH);
 
-          const natW = sourceImg.naturalWidth;
-          const natH = sourceImg.naturalHeight;
-
-          const sx = Math.round(cropFracX * natW);
-          const sy = Math.round(cropFracY * natH);
-          const sW = Math.max(1, Math.round(cropFracW * natW));
-          const sH = Math.max(1, Math.round(cropFracH * natH));
+          const sx = Math.round(fracX * natW);
+          const sy = Math.round(fracY * natH);
+          const sw = Math.max(1, Math.round(fracW * natW));
+          const sh = Math.max(1, Math.round(fracH * natH));
 
           const cropCanvas = document.createElement('canvas');
-          cropCanvas.width = sW;
-          cropCanvas.height = sH;
+          cropCanvas.width = sw;
+          cropCanvas.height = sh;
           const ctx = cropCanvas.getContext('2d');
-          ctx.drawImage(sourceImg, sx, sy, sW, sH, 0, 0, sW, sH);
+          ctx.drawImage(targetImg, sx, sy, sw, sh, 0, 0, sw, sh);
 
           const croppedBlob = await new Promise(resolve => cropCanvas.toBlob(resolve, 'image/jpeg', 0.96));
           const croppedBlobUrl = URL.createObjectURL(croppedBlob);
 
-          // Update element properties smoothly without jumping position
+          if (!elem.originalUrl) {
+            elem.originalUrl = elem.url;
+          }
+
           elem.url = croppedBlobUrl;
-          elem.aspectRatio = sW / sH;
+          elem.aspectRatio = sw / sh;
           elem.height = Math.round(elem.width / elem.aspectRatio);
 
-          croppingElementId = null;
-          cropOverlay.remove();
+          closeCropModal();
           renderCanvasElements();
           renderSidebarList();
           updateSelectedUI();
-          showNotification('Crop applied successfully!', 'success');
+          showNotification(`Cropped ${cardSideLabel} successfully!`, 'success');
         } catch (err) {
           console.error('Crop error:', err);
-          showNotification('Could not crop image: ' + err.message, 'error');
-          croppingElementId = null;
-          cropOverlay.remove();
-          renderCanvasElements();
+          showNotification('Could not apply crop: ' + err.message, 'error');
+          applyBtn.textContent = '✔ Apply Crop';
+          applyBtn.disabled = false;
         }
-      });
-
-      // Reset to Full Original Image
-      cropOverlay.querySelector('#cropResetBtn')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        saveState();
-        elem.url = elem.originalUrl || elem.url;
-
-        const img = new Image();
-        img.onload = () => {
-          elem.aspectRatio = img.naturalWidth / img.naturalHeight;
-          elem.height = Math.round(elem.width / elem.aspectRatio);
-          croppingElementId = null;
-          cropOverlay.remove();
-          renderCanvasElements();
-          renderSidebarList();
-          updateSelectedUI();
-          showNotification('Reset to full original image.', 'info');
-        };
-        img.src = elem.url;
-      });
-
-      // Cancel Crop
-      cropOverlay.querySelector('#cropCancelBtn')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        croppingElementId = null;
-        cropOverlay.remove();
-        renderCanvasElements();
       });
     }
 
-    // Sidebar crop button triggers in-place crop
+    // Sidebar crop button triggers cropping modal
     document.getElementById('f4SidebarCropBtn')?.addEventListener('click', () => {
       const selected = elements.find(el => el.id === selectedElementId);
       if (selected) {
-        startInPlaceCrop(selected);
+        openIdCardCroppingModal(selected);
       }
     });
 
@@ -2884,9 +3024,16 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
           </div>
         </div>
 
-        <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;">
+        <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
           <span class="text-xs text-muted font-mono">🔒 Temporary 5-minute signed token &bull; Purged on completion</span>
-          <button class="btn btn-secondary close-admin-preview-btn">Close Preview</button>
+          <div style="display:flex;gap:8px;align-items:center;">
+            ${isIdCardEligibleJob(job) ? `
+              <button class="btn btn-primary preview-open-f4-editor-btn" style="background:#2563eb;border-color:#2563eb;">
+                🪪 Open in A4 ID Card Editor
+              </button>
+            ` : ''}
+            <button class="btn btn-secondary close-admin-preview-btn">Close Preview</button>
+          </div>
         </div>
       </div>
     `;
@@ -2895,6 +3042,10 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
 
     const closeModal = () => modal.remove();
     modal.querySelectorAll('.close-admin-preview-btn').forEach(b => b.addEventListener('click', closeModal));
+    modal.querySelector('.preview-open-f4-editor-btn')?.addEventListener('click', () => {
+      closeModal();
+      openCafeAdminF4Editor(job);
+    });
     modal.addEventListener('click', (e) => {
       if (e.target === modal) closeModal();
     });
