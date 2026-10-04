@@ -4672,6 +4672,51 @@ html[data-theme="dark"] .admin-topbar {
   border-color: var(--border-medium);
 }
 
+.admin-metric-card:active,
+.admin-metric-card:focus,
+.admin-metric-card:focus-visible {
+  background: var(--bg-surface) !important;
+  border-color: #2563eb !important;
+  outline: none !important;
+}
+
+#overviewActiveQueueCard,
+#overviewEarningsCard {
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#overviewActiveQueueCard:hover,
+#overviewEarningsCard:hover {
+  border-color: #2563eb;
+}
+
+#overviewActiveQueueCard:active,
+#overviewActiveQueueCard:focus,
+#overviewEarningsCard:active,
+#overviewEarningsCard:focus {
+  background: var(--bg-surface) !important;
+  border-color: #2563eb !important;
+  outline: none !important;
+}
+
+.tab-pane-fade {
+  display: block;
+  width: 100%;
+  animation: fadeInPane 0.2s ease-in-out;
+}
+
+@keyframes fadeInPane {
+  from {
+    opacity: 0.9;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .metric-header {
   display: flex;
   justify-content: space-between;
@@ -6381,7 +6426,7 @@ html[data-theme="dark"] .admin-topbar {
 /* Job Cards Grid */
 .jobs-cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
   gap: 16px;
 }
 
