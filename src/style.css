@@ -7122,17 +7122,17 @@ html[data-theme="dark"] .admin-topbar {
   cursor: default;
 }
 
-/* Compact Supporting Sidebar (250px) */
+/* Compact Supporting Sidebar (285px with comfortable breathing room) */
 .a4-editor-sidebar {
-  width: 250px;
+  width: 285px;
   flex-shrink: 0;
   background: var(--bg-canvas);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  padding: 14px;
+  padding: 16px 14px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   overflow-y: auto;
 }
 
@@ -7147,11 +7147,11 @@ html[data-theme="dark"] .admin-topbar {
 .a4-sidebar-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .a4-sidebar-title {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -7162,14 +7162,14 @@ html[data-theme="dark"] .admin-topbar {
 .a4-elements-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .a4-element-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: 10px;
+  padding: 7px 10px;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
@@ -7186,11 +7186,11 @@ html[data-theme="dark"] .admin-topbar {
 .a4-control-group {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .a4-control-label {
-  font-size: 0.72rem;
+  font-size: 0.74rem;
   font-weight: 600;
   color: var(--text-secondary);
 }
@@ -7200,4 +7200,5 @@ html[data-theme="dark"] .admin-topbar {
   accent-color: #2563eb;
   cursor: pointer;
 }
+
 

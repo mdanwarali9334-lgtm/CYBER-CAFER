@@ -146,22 +146,26 @@ function renderPortalMain(container, { cafe, can_print, status_message, pricing,
       totalPages += (f.pages || 1);
     }
 
-    let frontCount = 0;
-    let backCount = 0;
+    const isId = isIdCardType(documentType);
     const frontFile = getFrontFile();
     const backFile = getBackFile();
+    const frontUploaded = !!frontFile;
+    const backUploaded = !!backFile;
+    let billableUnits = 0;
 
-    if (isIdCardType(documentType)) {
-      frontCount = frontFile ? (frontFile.pages || 1) : 0;
-      backCount = backFile ? (backFile.pages || 1) : 0;
-      totalPages = frontCount + backCount;
-    }
-
-    // Single Side means each uploaded side is printed on its own physical side/page.
-    // Duplex means two printable pages are printed on one physical sheet.
-    let billableUnits = totalPages;
-    if (isDuplex) {
-      billableUnits = Math.ceil(totalPages / 2);
+    if (isId) {
+      // ID CARD BILLING RULE:
+      // Front + Back (or Front only) = ONE ID Card Copy = 1 billable unit.
+      // The two uploaded images represent the two sides of 1 physical ID card.
+      const hasAnySide = frontUploaded || backUploaded;
+      billableUnits = hasAnySide ? 1 : 0;
+      totalPages = billableUnits;
+    } else {
+      // Normal Document
+      billableUnits = totalPages;
+      if (isDuplex) {
+        billableUnits = Math.ceil(totalPages / 2);
+      }
     }
 
     const totalPrice = Math.round((billableUnits * copies * unitRate) * 100) / 100;
@@ -171,8 +175,8 @@ function renderPortalMain(container, { cafe, can_print, status_message, pricing,
       documentTypeLabel: getDocumentTypeLabel(documentType),
       frontFile,
       backFile,
-      frontCount,
-      backCount,
+      frontUploaded,
+      backUploaded,
       totalPages,
       billableUnits,
       unitRate,
@@ -186,7 +190,7 @@ function renderPortalMain(container, { cafe, can_print, status_message, pricing,
   }
 
   function renderBreakdownHtml(breakdown) {
-    const { documentTypeLabel, frontCount, backCount, totalPages, billableUnits, unitRate, isColor, isDuplex, copies, totalPrice } = breakdown;
+    const { documentTypeLabel, frontUploaded, backUploaded, totalPages, billableUnits, unitRate, isColor, isDuplex, copies, totalPrice } = breakdown;
     const colorLabel = isColor ? 'Colour' : 'B&W';
     const modeLabel = isDuplex ? 'Double-Sided (Duplex)' : 'Single Side';
 
@@ -199,35 +203,25 @@ function renderPortalMain(container, { cafe, can_print, status_message, pricing,
           </div>
           <div class="breakdown-row">
             <span class="text-muted">Front:</span>
-            <span class="font-mono ${frontCount > 0 ? 'text-primary font-bold' : 'text-muted'}">${frontCount > 0 ? `${frontCount} page` : 'Not uploaded (0)'}</span>
+            <span class="font-mono ${frontUploaded ? 'text-primary font-bold' : 'text-muted'}">${frontUploaded ? 'Uploaded' : 'Not uploaded'}</span>
           </div>
           <div class="breakdown-row">
             <span class="text-muted">Back:</span>
-            <span class="font-mono ${backCount > 0 ? 'text-primary font-bold' : 'text-muted'}">${backCount > 0 ? `${backCount} page` : 'Not uploaded (0)'}</span>
+            <span class="font-mono ${backUploaded ? 'text-primary font-bold' : 'text-muted'}">${backUploaded ? 'Uploaded' : 'Not uploaded'}</span>
           </div>
           <div class="breakdown-divider"></div>
-          <div class="breakdown-row">
-            <span class="text-muted">Print Mode:</span>
-            <span class="font-mono">${escapeHtml(modeLabel)}</span>
-          </div>
           <div class="breakdown-row">
             <span class="text-muted">Colour Mode:</span>
             <span class="font-mono">${isColor ? 'Full Colour' : 'Black & White'}</span>
           </div>
           <div class="breakdown-row">
-            <span class="text-muted">${colorLabel} Pages:</span>
-            <span class="font-mono font-bold">${totalPages} ${isDuplex ? `(${billableUnits} sheet${billableUnits !== 1 ? 's' : ''})` : ''}</span>
+            <span class="text-muted">ID Card Copies:</span>
+            <span class="font-mono font-bold">${copies}</span>
           </div>
           <div class="breakdown-row">
             <span class="text-muted">${colorLabel} Rate:</span>
-            <span class="font-mono">₹${unitRate.toFixed(2)} / ${isDuplex ? 'sheet' : 'page'}</span>
+            <span class="font-mono">₹${unitRate.toFixed(2)} / copy</span>
           </div>
-          ${copies > 1 ? `
-            <div class="breakdown-row">
-              <span class="text-muted">Copies:</span>
-              <span class="font-mono">&times; ${copies}</span>
-            </div>
-          ` : ''}
           <div class="summary-total-row mt-3">
             <div>
               <span class="summary-total-lbl font-mono">ESTIMATED TOTAL</span>
@@ -405,7 +399,7 @@ function renderPortalMain(container, { cafe, can_print, status_message, pricing,
               <span class="step-num font-mono">02</span>
               <div>
                 <h3>${isId ? 'Upload ID Card Photos (Front & Back)' : 'Upload Printable Documents'}</h3>
-                <p class="text-xs text-muted">${isId ? 'Upload Front and Back sides as two photos. Each physical side counts as one printable page.' : 'Supports PDF and JPG/JPEG/PNG images up to 25MB each.'}</p>
+                <p class="text-xs text-muted">${isId ? 'Upload Front and Back sides as two photos. Both sides are arranged onto 1 physical ID card copy.' : 'Supports PDF and JPG/JPEG/PNG images up to 25MB each.'}</p>
               </div>
             </div>
 
@@ -421,14 +415,14 @@ function renderPortalMain(container, { cafe, can_print, status_message, pricing,
                 <div class="id-slot-card ${frontFile ? 'has-file' : 'empty'}">
                   <div class="id-slot-header">
                     <strong>Front Side Photo <span class="text-danger">*</span></strong>
-                    <span class="badge font-mono text-xs ${frontFile ? 'badge-success' : 'badge-staff'}">${frontFile ? '1 page' : 'Required'}</span>
+                    <span class="badge font-mono text-xs ${frontFile ? 'badge-success' : 'badge-staff'}">${frontFile ? 'Front Side' : 'Required'}</span>
                   </div>
                   ${frontFile ? `
                     <div class="id-slot-preview">
                       <img src="${frontFile.previewUrl}" alt="Front Side" class="id-slot-img" />
                       <div class="id-slot-info">
                         <strong class="text-xs truncate font-mono">${escapeHtml(frontFile.name)}</strong>
-                        <span class="text-xs text-muted font-mono">${formatFileSize(frontFile.size)} &bull; 1 page</span>
+                        <span class="text-xs text-muted font-mono">${formatFileSize(frontFile.size)} &bull; Front Side</span>
                       </div>
                     </div>
                     <div class="id-slot-actions">
@@ -449,14 +443,14 @@ function renderPortalMain(container, { cafe, can_print, status_message, pricing,
                 <div class="id-slot-card ${backFile ? 'has-file' : 'empty'}">
                   <div class="id-slot-header">
                     <strong>Back Side Photo</strong>
-                    <span class="badge font-mono text-xs ${backFile ? 'badge-success' : 'badge-staff'}">${backFile ? '1 page' : 'Optional'}</span>
+                    <span class="badge font-mono text-xs ${backFile ? 'badge-success' : 'badge-staff'}">${backFile ? 'Back Side' : 'Optional'}</span>
                   </div>
                   ${backFile ? `
                     <div class="id-slot-preview">
                       <img src="${backFile.previewUrl}" alt="Back Side" class="id-slot-img" />
                       <div class="id-slot-info">
                         <strong class="text-xs truncate font-mono">${escapeHtml(backFile.name)}</strong>
-                        <span class="text-xs text-muted font-mono">${formatFileSize(backFile.size)} &bull; 1 page</span>
+                        <span class="text-xs text-muted font-mono">${formatFileSize(backFile.size)} &bull; Back Side</span>
                       </div>
                     </div>
                     <div class="id-slot-actions">
@@ -711,7 +705,7 @@ function renderPortalMain(container, { cafe, can_print, status_message, pricing,
                     <span class="font-mono text-xs text-accent">#${i + 1}</span>
                     <strong>${escapeHtml(f.name)}${fileSideLabel}</strong>
                     <div class="preview-file-tags font-mono text-xs text-muted mt-1">
-                      <span>${f.pages} pg${f.pages > 1 ? 's' : ''}</span> &bull; 
+                      <span>${isId ? (f.side === 'front' ? 'Front Photo' : f.side === 'back' ? 'Back Photo' : 'ID Photo') : `${f.pages} pg${f.pages > 1 ? 's' : ''}`}</span> &bull; 
                       <span>${copiesVal} cop${copiesVal > 1 ? 'ies' : 'y'}</span> &bull; 
                       <span>${colorModeVal.toUpperCase()}</span> &bull; 
                       <span>${duplexVal.toUpperCase()}</span> &bull; 
@@ -720,7 +714,7 @@ function renderPortalMain(container, { cafe, can_print, status_message, pricing,
                     </div>
                   </div>
                   <div class="preview-file-price font-mono font-bold">
-                    ${f.pages} page${f.pages > 1 ? 's' : ''}
+                    ${isId ? (f.side === 'front' ? 'Front Side' : f.side === 'back' ? 'Back Side' : 'ID Asset') : `${f.pages} page${f.pages > 1 ? 's' : ''}`}
                   </div>
                 </div>
               `;
@@ -1285,7 +1279,7 @@ function renderPortalMain(container, { cafe, can_print, status_message, pricing,
         customerPhone: custPhoneVal || null,
         files: preparedFilesMeta,
         fileName: defaultFileName,
-        pages: breakdown.totalPages, // Authoritative sum of all pages (e.g. 2 for Front + Back)
+        pages: isIdCardType(documentType) ? 1 : breakdown.totalPages, // 1 billable ID Card copy for ID Card workflows
         copies: copiesVal,
         colorMode: colorModeVal,
         duplex: duplexVal,

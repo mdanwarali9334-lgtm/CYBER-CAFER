@@ -634,8 +634,8 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
                       <span class="file-name-truncate" title="${escapeHtml(j.file_name)}">${escapeHtml(j.file_name)}</span>
                     </div>
                     <div class="job-specs-pills font-mono text-xs">
-                      <span>${j.pages} pg${j.pages > 1 ? 's' : ''}</span>
-                      <span>${j.copies} cop${j.copies > 1 ? 'ies' : 'y'}</span>
+                      <span>${isIdEligible ? `ID Card Copy: ${j.copies || 1}` : `${j.pages} pg${j.pages > 1 ? 's' : ''}`}</span>
+                      ${!isIdEligible && j.copies > 1 ? `<span>${j.copies} copies</span>` : ''}
                       <span>${j.color_mode.toUpperCase()}</span>
                       <span>${j.duplex.toUpperCase()}</span>
                       <span>${(j.orientation || 'portrait').toUpperCase()}</span>
@@ -682,11 +682,11 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
                   `}
 
                   ${isIdEligible && !isCompletedOrPurged ? `
-                    <button class="btn btn-sm btn-secondary open-f4-editor-btn" data-job-id="${j.id}" title="Edit Document & ID Card Layout in F4/A4 Editor">
+                    <button class="btn btn-sm btn-secondary open-f4-editor-btn" data-job-id="${j.id}" title="Open A4 ID Card Editor">
                       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" style="width:13px;height:13px;margin-right:4px;">
                         <path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
                       </svg>
-                      Edit Layout (F4/A4)
+                      A4 ID Card Editor
                     </button>
                   ` : ''}
 
@@ -936,7 +936,7 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
       return;
     }
 
-    showNotification('Preparing F4 / A4 Document Editor...', 'info');
+    showNotification('Preparing A4 ID Card Editor...', 'info');
 
     // 1. Gather all printable image sources
     const rawFiles = [];
@@ -1025,10 +1025,10 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
             <div>
               <div style="display:flex;gap:8px;align-items:center;">
                 <span class="pill-tag font-mono">PRINT WORKSPACE</span>
-                <span class="badge font-mono text-xs" style="background:#2563eb;color:#fff;padding:2px 8px;border-radius:12px;font-weight:700;">A4 / F4 ID CARD EDITOR</span>
+                <span class="badge font-mono text-xs" style="background:#2563eb;color:#fff;padding:2px 8px;border-radius:12px;font-weight:700;">A4 ID CARD EDITOR</span>
               </div>
               <h2 class="editorial-h2" style="font-size:1.15rem;margin:2px 0 0 0;">
-                Order #${escapeHtml(job.order_number || job.job_number)} &bull; ${escapeHtml(job.customer_name || 'Customer')}
+                A4 ID Card Editor &bull; Order #${escapeHtml(job.order_number || job.job_number)} &bull; ${escapeHtml(job.customer_name || 'Customer')}
               </h2>
             </div>
           </div>
@@ -2375,8 +2375,8 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
               </span>
             </div>
             <div class="detail-item-row">
-              <span class="detail-item-label">Document Pages</span>
-              <span class="detail-item-value font-mono">${job.pages} page${job.pages > 1 ? 's' : ''}</span>
+              <span class="detail-item-label">${isIdCardEligibleJob(job) ? 'Billable Units' : 'Document Pages'}</span>
+              <span class="detail-item-value font-mono">${isIdCardEligibleJob(job) ? `${job.copies || 1} ID Card Copy` : `${job.pages} page${job.pages > 1 ? 's' : ''}`}</span>
             </div>
             <div class="detail-item-row">
               <span class="detail-item-label">Quantity (Copies)</span>
@@ -2384,7 +2384,7 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
             </div>
             <div class="detail-item-row">
               <span class="detail-item-label">Total Printed Sheets</span>
-              <span class="detail-item-value font-mono font-bold">${totalSheets} sheets</span>
+              <span class="detail-item-value font-mono font-bold">${isIdCardEligibleJob(job) ? `${job.copies || 1} sheet${(job.copies || 1) > 1 ? 's' : ''}` : `${totalSheets} sheets`}</span>
             </div>
             <div class="detail-item-row">
               <span class="detail-item-label">Color Mode</span>
@@ -2457,7 +2457,7 @@ export async function renderCafeAdminDashboard(container, { user, profile, isSta
             ` : ''}
             ${isIdCardEligibleJob(job) && !isCompletedOrPurged ? `
               <button class="btn btn-primary modal-open-f4-editor-btn" style="background:#2563eb;border-color:#2563eb;">
-                🪪 Edit Layout (F4/A4)
+                🪪 A4 ID Card Editor
               </button>
             ` : ''}
           </div>
