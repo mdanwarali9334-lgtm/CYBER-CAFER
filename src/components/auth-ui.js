@@ -106,29 +106,6 @@ function renderLoginForm(container) {
           <a href="/register" class="auth-inline-link font-semibold">Claim Cafe License / Register &rarr;</a>
         </div>
 
-        <!-- Demo Credentials 1-Click Fill Helper -->
-        <div class="demo-creds-container">
-          <span class="demo-creds-title font-mono">DEMO LOGIN SHORTCUTS (STEP 2 READY):</span>
-          <div class="demo-pills-grid">
-            <button type="button" class="demo-pill-btn" data-email="superadmin@presspoint.io" data-role="Super Admin (System Global)">
-              <strong>Super Admin</strong>
-              <small>System-wide</small>
-            </button>
-            <button type="button" class="demo-pill-btn" data-email="cafeadmin@centralcyber.com" data-role="Cafe Admin (Cafe A)">
-              <strong>Cafe Admin</strong>
-              <small>Central Cyber</small>
-            </button>
-            <button type="button" class="demo-pill-btn" data-email="staff@centralcyber.com" data-role="Staff (Cafe A)">
-              <strong>Staff</strong>
-              <small>Cafe A</small>
-            </button>
-            <button type="button" class="demo-pill-btn" data-email="staff@apexprint.com" data-role="Staff (Cafe B)">
-              <strong>Staff (Cafe B)</strong>
-              <small>Apex Xerox</small>
-            </button>
-          </div>
-        </div>
-
         <!-- Security Footnote -->
         <div class="auth-security-footnote">
           <svg viewBox="0 0 16 16" fill="currentColor" class="lock-mini"><path d="M8 1a2 2 0 0 0-2 2v2H5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-1V3a2 2 0 0 0-2-2zm1 4H7V3a1 1 0 0 1 2 0v2z"/></svg>
@@ -145,27 +122,6 @@ function renderLoginForm(container) {
 
   // Attach handlers
   setupPasswordToggle('loginPassword', 'togglePwdBtn', 'eyeIcon');
-
-  // Demo credential auto-fill listeners
-  const demoPills = container.querySelectorAll('.demo-pill-btn');
-  demoPills.forEach(pill => {
-    pill.addEventListener('click', () => {
-      const email = pill.getAttribute('data-email');
-      const emailInput = document.getElementById('loginEmail');
-      const pwdInput = document.getElementById('loginPassword');
-      if (emailInput && pwdInput) {
-        emailInput.value = email;
-        pwdInput.value = 'PressPoint2026!';
-        emailInput.focus();
-        const alertBox = document.getElementById('authAlertBox');
-        if (alertBox) {
-          alertBox.className = 'auth-alert-box alert-success';
-          alertBox.textContent = `Loaded credentials for: ${email}. Click "Sign In" to authenticate.`;
-          alertBox.style.display = 'block';
-        }
-      }
-    });
-  });
 
   const form = document.getElementById('loginFormMain');
   form.addEventListener('submit', async (e) => {
